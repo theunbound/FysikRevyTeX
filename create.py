@@ -6,10 +6,15 @@ import sys
 import re
 sys.path.append("scripts")
 
+from rich.live import Live
+import time                     # til test!
+import asyncio
+
 import classy_revy as cr
 import setup_functions as sf
 import converters as cv
 import config as cf
+import output
 from tex import TeX
 from clobberers import clobber_steps, clobber_my_tex
 from pdf import PDF
@@ -23,7 +28,7 @@ def create_material_pdfs(revue):
             file_list.append(material)
 
     conv = cv.Converter()
-    conv.parallel_textopdf(file_list)
+    conv.parallel_textopdf( file_list )
     # for f in file_list:
     #    conv.textopdf(f)
 
@@ -118,6 +123,31 @@ def create_song_manus_pdf(revue):
     pdf = PDF()
     pdf.pdfmerge(file_list, os.path.join(path["pdf"],"sangmanuskript.pdf"))
 
+async def a_test(  ):
+    a = output.OutputRow( "sang_til_en_forelæser.tex",
+                          state = output.States.skipped )
+    b = output.OutputRow( "overambitiøst_intronummer.tex",
+                          state=output.States.texing, rate=4)
+    b2 = output.OutputRow( "overambitiøst_intronummer.tex",
+                           state=output.States.texing, rate=2)
+    b3 = output.OutputRow( "overambitiøst_intronummer.tex",
+                           state=output.States.texing, rate=1)
+    b4 = output.OutputRow( "overambitiøst_intronummer.tex",
+                           state=output.States.texing)
+    c = output.OutputRow( "fisk.tex", state=output.States.success)
+    d = output.OutputRow( "kontaktliste.tex", state=output.States.failed )
+    grid = output.output_grid( ((a,b,b2,b3,b4,c,d))[-(os.get_terminal_size()[1]):] )
+    with Live( grid, refresh_per_second=10, vertical_overflow="crop" ) as live:
+        await asyncio.sleep( 5 )
+        b.state = output.States.errors
+        live.update( output.output_grid( ((a,b,b2,b3,b4,c,d))[-(os.get_terminal_size()[1]):] ))
+        b2.activity_ping()
+        await asyncio.sleep( 3 )
+        live.update( output.output_grid( (a,b,b2,b3,b4,c,d,) ))
+
+def test( *_ ):
+    asyncio.run( a_test() )
+        
 class Argument:
     def __init__(self, cmd, doc, action):
         self.cmd = cmd
@@ -168,66 +198,68 @@ Flag:""")
 actions = [
     Argument( "aktoversigt",
               "TeX en ny aktoversigt",
-              lambda tex: ( tex.create_act_outline(),
+              lambda tex, revue: ( tex.create_act_outline(),
                         tex.topdf("aktoversigt.pdf")
                         )
               ),
 
     Argument( "roles",
               "TeX en ny rolleliste",
-              lambda tex: ( tex.create_role_overview(),
+              lambda tex, revue: ( tex.create_role_overview(),
                             tex.topdf("rolleliste.pdf")
                            )
               ),
 
     Argument( "frontpage",
               "TeX en ny forside",
-              lambda tex: ( tex.create_frontpage( ),
+              lambda tex, revue: ( tex.create_frontpage( ),
                             tex.topdf("forside.pdf")
                            )
               ),
     
     Argument( "thumbindex",
               "TeX et nyt registerindeks",
-              lambda tex: ( tex.create_thumbindex(),
+              lambda tex, revue: ( tex.create_thumbindex(),
                             tex.topdf("thumbindex.pdf")
                             )
               ),
 
     Argument( "props",
               "Opdater rekvisitliste i Google Sheets (hvis det er sat op)",
-              lambda tex: ( tex.create_props_list() )
+              lambda tex, revue: ( tex.create_props_list() )
               # TODO: måske hører den funktion ikke hjemme i tex længere?
               ),
               
     Argument( "contacts",
               "TeX en ny kontaktliste",
-              lambda tex: ( tex.create_contacts_list("contacts.csv"),
+              lambda tex, revue: ( tex.create_contacts_list("contacts.csv"),
                             tex.topdf("kontaktliste.pdf")
                            )
              ),
     
     Argument( "material",
               "Gen-TeX materialesiderne (hvis de er blevet ændret)",
-              lambda tex: create_material_pdfs(revue)
+              lambda tex, revue: create_material_pdfs(revue)
               ),
 
     Argument( "individual",
               "Sammensæt nye individuelle manuskripter (hvis der er ændringer)",
-              lambda tex: create_individual_pdfs(revue)
+              lambda tex, revue: create_individual_pdfs(revue)
               ),
 
     Argument( "songmanus",
               "Sammensæt et nyt sangmanuskript (hvis der er ændringer)",
-              lambda tex: create_song_manus_pdf(revue)
+              lambda tex, revue: create_song_manus_pdf(revue)
               ),
 
     Argument( "signup",
               "TeX en ny tilmeldingsblanket",
-              lambda tex: ( tex.create_signup_form(),
+              lambda tex, revue: ( tex.create_signup_form(),
                             tex.topdf("rolletilmelding.pdf")
                            )
-              )
+              ),
+
+    Argument( "test", "test", test )
     ]
 
 def create_parts(revue, args):
@@ -238,7 +270,7 @@ def create_parts(revue, args):
 
     for action in actions:
         if action.cmd in args:
-            action.action( tex )
+            action.action( tex, revue )
 
 def tex_all(conf):
     conf["TeXing"]["force TeXing of all files"] = "yes"
@@ -277,19 +309,18 @@ manus_commands = (tuple() if conf.getboolean("TeXing","skip thumbindex")
     ("aktoversigt", "roles", "frontpage", "props", "contacts", "material")
 
             
-if __name__ == "__main__":
-
+def create(arguments = sys.argv):
     # Load configuration file:
     conf.load("revytex.conf")
-    conf.add_args([ x for x in sys.argv[1:] if x[0] != "-" ])
+    conf.add_args([ x for x in arguments[1:] if x[0] != "-" ])
     
     for toggle in toggles:
-        if toggle.cmd in sys.argv:
+        if toggle.cmd in arguments:
             toggle.action(conf) 
     for flag in flags:
         if flag.cmd in \
            "".join( [ match[1] for match in
-                      [ re.match( r"^-([^-]+)", arg ) for arg in sys.argv ]
+                      [ re.match( r"^-([^-]+)", arg ) for arg in arguments ]
                       if match ]
                      ):
             flag.action(conf) 
@@ -298,7 +329,7 @@ if __name__ == "__main__":
     # if "-v" in sys.argv:
     #     conf["TeXing"]["verbose output"] = "yes"
 
-    if "plan" in sys.argv or not os.path.isfile("aktoversigt.plan"):
+    if "plan" in arguments or not os.path.isfile("aktoversigt.plan"):
         sf.create_plan_file("aktoversigt.plan")
         sys.exit("Plan file 'aktoversigt.plan' created successfully.")
 
@@ -306,10 +337,10 @@ if __name__ == "__main__":
     path = revue.conf["Paths"]
     conv = cv.Converter()
 
-    arglist = tuple( sys.argv[1:] )
+    arglist = tuple( arguments[1:] )
     if all( arg[0] == "-" for arg in arglist ):
         arglist = default_commands
-    elif "manus" in sys.argv:
+    elif "manus" in arguments:
         arglist = arglist + manus_commands
 
     try:
@@ -318,7 +349,7 @@ if __name__ == "__main__":
         print( "Some TeX files failed to compile. Can't create manuscripts.")
     else:
 
-    	if len(conf.cmd_parts) == 0 or "manus" in sys.argv:
+    	if len(conf.cmd_parts) == 0 or "manus" in arguments:
     	    pdf = PDF()
     	    pdf.pdfmerge(
     	        (( os.path.join(path["pdf"],"forside.pdf"), "Forside" ),
@@ -334,3 +365,6 @@ if __name__ == "__main__":
     	        os.path.join(path["pdf"],"manuskript.pdf"))
     	
     	    print("Manuscript successfully created!")
+
+if __name__ == "__main__":
+    create()
