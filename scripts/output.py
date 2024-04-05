@@ -37,12 +37,12 @@ class OutputRow:
     rate_multiplier = .25
     max_rate = 6 * rate_multiplier
     
-    def __init__( self, all_rows, state, live = None, name="", rate=0 ):
+    def __init__( self, update_live, state, live = None, name="", rate=0 ):
         self.live = live
         self.spinner = Spinner( "dots" )
         self.spinner.speed = rate * self.rate_multiplier
         self.next_speed = 0
-        self.all_rows = all_rows
+        self.update_live = update_live
         self._name = name
         self._state = state
 
@@ -87,7 +87,8 @@ class OutputRow:
         self.row = self.spinner if self.state in processing_states else " "\
             , *self.state.value \
             , self.name
-        self.live.update( output_grid( self.all_rows ))
+        self.update_live()
+        # self.live.update( output_grid( self.all_rows ))
 
     def append_to_grid( self, grid ):
         grid.add_row( *self.row )
@@ -109,13 +110,17 @@ class OutputRow:
 
 class GridManager:              # not that kind of manager
     def __init__(self, *args, **kwargs):
-        self.live = Live( output_grid( [] ), *args, **kwargs)
+        self.rows = [ OutputRow( self.update_live, States.skipped, "test" ) ]
+        self.live = Live( output_grid( self.rows ), *args, **kwargs)
         self.live.start()
-        self.rows = []
 
+    def update_live( self ):
+        print( output_grid( self.rows ) )
+        self.live.update( output_grid( self.rows ) )
+        
     def new_row_number( self, state, name="", rate=0 ):
         number = len( self.rows )
-        self.rows += [ OutputRow( self.rows, state, name=name, rate=rate, live=self.live ) ]
+        self.rows += [ OutputRow( self.update_live, state, name=name, rate=rate, live=self.live ) ]
         self.live.update( output_grid( self.rows ) )
         print("ping", self.rows )
         return number
