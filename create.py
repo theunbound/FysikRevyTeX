@@ -118,6 +118,16 @@ def create_song_manus_pdf(revue):
     pdf = PDF()
     pdf.pdfmerge(file_list, os.path.join(path["pdf"],"sangmanuskript.pdf"))
 
+def roles_csv( revue ):
+    try:
+        fn = conf["Files"]["role overview"]
+    except KeyError:
+        revue.write_roles_csv()
+        print( "Wrote roles.csv (default name, can be set in revytex.conf)" )
+        return
+    revue.write_roles_csv( fn )
+    print( "Wrote {}".format( fn ))
+
 class Argument:
     def __init__(self, cmd, doc, action):
         self.cmd = cmd
@@ -227,6 +237,11 @@ actions = [
               lambda tex: ( tex.create_signup_form(),
                             tex.topdf("rolletilmelding.pdf")
                            )
+              ),
+
+    Argument( "roles-sheet",
+              "Lav en csv(/tsv) fil med en oversigt over rollerne.",
+              lambda tex: roles_csv( revue )
               )
     ]
 

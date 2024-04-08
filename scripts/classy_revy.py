@@ -227,5 +227,28 @@ class Revue:
 
         return acts
 
-
-
+    def write_roles_csv( self, fn = "roles.csv" ):
+        fn = Path( fn )
+        sep_car = "\t" if fn.suffix == ".tsv" else ";"
+        table = [["","Akt","Titel","Filnavn","Roller"]]
+        for act in self.acts:
+            act_table = []
+            for mat in act.materials:
+                act_table += [
+                    ['Fork.', '', mat.title,
+                     Path( mat.path )\
+                           .relative_to( Path.cwd(),  )\
+                           .as_posix()
+                     ] + [ role.abbreviation for role in mat.roles ],
+                    ['Skuespiller','','','']\
+                     + [ role.actor for role in mat.roles ],
+                    ['Beskrivelse','','','']\
+                     + [ role.role for role in mat.roles ]
+                ]
+            act_table[0][1] = act.name
+            table += act_table
+        with fn.open( mode="w", encoding="utf-8" ) as f:
+            f.write( "\n".join( [ sep_car.join(
+                [ '"{}"'.format( cell ) if sep_car in cell else cell
+                  for cell in row
+                 ] ) for row in table ] ) )
