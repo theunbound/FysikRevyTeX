@@ -282,6 +282,7 @@ class Revue:
             table += act_table
         with fn.open( mode="w", encoding="utf-8" ) as f:
             f.write( "\n".join( [ sep_car.join(
-                [ '"{}"'.format( cell ) if sep_car in str(cell) else str(cell) if cell else ''
+                [ '"{}"'.format( cell ) if sep_car in str(cell)
+                  else str(cell) if cell else ''
                   for cell in row
                  ] ) for row in table ] ) )
