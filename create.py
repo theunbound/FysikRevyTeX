@@ -5,6 +5,7 @@ import os
 import sys
 import re
 sys.path.append("scripts")
+from multiprocessing import Pool
 
 import classy_revy as cr
 import setup_functions as sf
@@ -119,6 +120,15 @@ def create_song_manus_pdf(revue):
     pdf.pdfmerge(file_list, os.path.join(path["pdf"],"sangmanuskript.pdf"))
 
 def roles_csv( revue ):
+    mats = [ mat for act in revue.acts for mat in act.materials ]
+    conv = cv.Converter()
+    
+    with Pool() as pool:
+        counts = pool.map( conv.tex_to_wordcount, [ mat.path for mat in mats ] )
+
+    for mat, count in zip( mats, counts ):
+        mat.wordcounts = count
+    
     try:
         fn = conf["Files"]["role overview"]
     except KeyError:
