@@ -2,6 +2,8 @@
 from functools import reduce
 from itertools import zip_longest
 from pathlib import Path
+from dataclasses import dataclass
+from typing import Callable
 
 # dependencies
 from fuzzywuzzy import fuzz
@@ -92,3 +94,93 @@ begge er angivet prioriteres filnavnet.
             scorechart[ title ][ "scores" ][ i ] = 0
 
     return { "translations": translations, "scorechart": scorechart }
+
+def pdf_matrix( fn, revue ):
+    if "role_names" in revue.conf["Files"] \
+       and revue.conf["Files"]["role_names"]:
+        try:
+            rolenamerows = rows_from_csv_etc(
+                revue.conf["Files"]["role_names"]
+                )
+            print("Bruger {} som rollenavneliste.\n".format(
+                revue.conf["Files"]["role_names"]
+                ))
+        except FileNotFoundError:
+            print(
+                "Kunne ikke finde filen {}, "
+                + "som er angivet i conf-filen.\n"
+                .format( revue.conf["Files"]["role_names"] )
+                )
+        else:
+            rolenamedict = {}
+            for row in rolenamerows[1:]:
+                rolenames = {}
+                for abbr, name in zip( rolenamerows[0][1:], row[1:] ):
+                    if name:
+                        rolenames[ abbr ] = name
+                rolenamedict[ row[0] ] = rolenames
+
+    try:
+        role_rows = rows_from_csv_etc( fname )
+        print("Bruger {} til rollefordeling.\n".format( fname ) )
+
+    except FileNotFoundError as e:
+        print("""
+Kunne ikke finde csv-filen til rollefordeling:
+({})
+""".format( fname )
+        )
+        raise e
+
+    else:
+        # prøv at gætte sammenhængen mellem nummer-navne i
+        # rollefordelingsfilen og manuskriptfilerne, med fuzzy
+        # matching, se https://pypi.org/project/fuzzywuzzy/
+        materials = [ material for act in revue.acts
+                      for material in act.materials ]
+
+        def rolename_when_exists( title, abbr ):
+            try:
+                return rolenamedict[ title ][ abbr ]
+            except:
+                return ""
+
+        scorechart = {
+            row[0]: {
+                "scores": [ fuzz.partial_ratio( material.title, row[0] )
+                            for material in materials ],
+                "roles": [ Role( abbr, name,
+                                 rolename_when_exists( row[0], abbr ) )
+                           for abbr, name in zip(
+                                   row[1:], role_rows[0][1:]
+                           ) if abbr
+                ]
+            }
+            for row in role_rows[1:]
+        }
+        translations = {}
+        return { "translations": translations, "scorechart": scorechart }
+
+@dataclass
+class RolesFormat:
+    name: str
+    description: str
+    default_filename: str
+    reader: Callable[[str, Revue], dict]
+
+formats = [
+    RolesFormat( name = "pdf-matrix",
+                 default_filename = "roller.csv",
+                 reader = pdf_matrix,
+                 description = """
+Ligesom formatet i rolleoversigten, som bliver sat i manuskriptet.
+"""
+                ),
+    RolesFormat( name = "overview",
+                 default_filename = "roles.csv",
+                 reader = rowwise_csv,
+                 description = """"
+Det format, som kommer ud af kommandoen roles-sheet til create.
+"""
+                )
+]

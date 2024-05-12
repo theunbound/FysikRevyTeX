@@ -2,8 +2,7 @@ import re
 import os
 from base_classes import Role
 from tex import TeX
-from fuzzywuzzy import fuzz
-from helpers import split_outside_quotes,rows_from_csv_etc
+from roles_reader import formats
 
 stoptext = """
         ╔═╗╔╦╗╔═╗╔═╗        
@@ -64,74 +63,35 @@ class RoleDistribution( ClobberInstructions ):
     @staticmethod
     def init( revue ):
 
-        if "role_names" in revue.conf["Files"] \
-           and revue.conf["Files"]["role_names"]:
+        active_formats = [ form for form in formats
+                           if revue.conf.has_option( "Files", form.name ) ]\
+                          or formats # if ^ is empty
+
+        interpretations = []
+        for form in active_formats:
             try:
-                rolenamerows = rows_from_csv_etc(
-                    revue.conf["Files"]["role_names"]
-                    )
-                print("Bruger {} som rollenavneliste.\n".format(
-                    revue.conf["Files"]["role_names"]
-                    ))
+                interpretations += form.reader(
+                    revue.conf.get( "Files", form.name,
+                                    fallback = form.default_filename )
+                )
             except FileNotFoundError:
-                print(
-                    "Kunne ikke finde filen {}, "
-                    + "som er angivet i conf-filen.\n"
-                    .format( revue.conf["Files"]["role_names"] )
-                    )
-            else:
-                rolenamedict = {}
-                for row in rolenamerows[1:]:
-                    rolenames = {}
-                    for abbr, name in zip( rolenamerows[0][1:], row[1:] ):
-                        if name:
-                            rolenames[ abbr ] = name
-                    rolenamedict[ row[0] ] = rolenames
-                
+                pass
+        
         fname = ( revue.conf["Files"]["roller"]
                   if "roller" in revue.conf["Files"]
                   else "roller.csv"
         )
 
         try:
-            role_rows = rows_from_csv_etc( fname )
-            print("Bruger {} til rollefordeling.\n".format( fname ) )
                 
         except FileNotFoundError:
             print("""
-Kunne ikke finde csv-filen til rollefordeling:
-({})
 Så det springer vi over denne gang.
 """.format( fname )
             )
             clobber_steps[ "role-distribution" ] = ClobberInstructions
 
         else:
-            # prøv at gætte sammenhængen mellem nummer-navne i
-            # rollefordelingsfilen og manuskriptfilerne, med fuzzy
-            # matching, se https://pypi.org/project/fuzzywuzzy/
-            materials = [ material for act in revue.acts
-                          for material in act.materials ]
-
-            def rolename_when_exists( title, abbr ):
-                try:
-                    return rolenamedict[ title ][ abbr ]
-                except:
-                    return ""
-            
-            scorechart = {
-                row[0]: {
-                    "scores": [ fuzz.partial_ratio( material.title, row[0] )
-                                for material in materials ],
-                    "roles": [ Role( abbr, name, rolename_when_exists( row[0], abbr ) )
-                               for abbr, name in zip(
-                                       row[1:], role_rows[0][1:]
-                               ) if abbr
-                    ]
-                }
-                for row in role_rows[1:]
-            }
-            translations = {}
 
             while scorechart:
                 # tag gættet med den højeste sikkerhed hver gang,
