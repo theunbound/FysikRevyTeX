@@ -77,20 +77,14 @@ class RoleDistribution( ClobberInstructions ):
             except FileNotFoundError:
                 pass
         
-        fname = ( revue.conf["Files"]["roller"]
-                  if "roller" in revue.conf["Files"]
-                  else "roller.csv"
-        )
-
-        try:
-                
-        except FileNotFoundError:
-            print("""
-Så det springer vi over denne gang.
-""".format( fname )
-            )
+        if len( interpretations ) = 0:
+            print("Kunne ikke læse nogen filer til rollefordeling:\n")
+            for form in active_formats:
+                print( "{}\n".format( form.default_filename ) )
+            print("Så det springer vi over denne gang.")
             clobber_steps[ "role-distribution" ] = ClobberInstructions
-
+            return
+        elif 
         else:
 
             while scorechart:
