@@ -10,7 +10,7 @@ from fuzzywuzzy import fuzz
 
 # locals
 from base_classes import Role
-from classy_revy import Material
+from classy_revy import Material, Revue
 from helpers import rows_from_csv_etc
 
 def trim_end( ar ):
@@ -76,7 +76,7 @@ begge er angivet prioriteres filnavnet.
             scorechart[ title ] = {
                 "scores": [ fuzz.partial_ratio( mat.title, title )
                             for mat in materials ],
-                "roels": roles
+                "roles": roles
             }
 
     try:
@@ -95,7 +95,7 @@ begge er angivet prioriteres filnavnet.
 
     return { "translations": translations, "scorechart": scorechart }
 
-def pdf_matrix( fn, revue ):
+def pdf_matrix( fname, revue ):
     if "role_names" in revue.conf["Files"] \
        and revue.conf["Files"]["role_names"]:
         try:
@@ -120,46 +120,35 @@ def pdf_matrix( fn, revue ):
                         rolenames[ abbr ] = name
                 rolenamedict[ row[0] ] = rolenames
 
-    try:
-        role_rows = rows_from_csv_etc( fname )
-        print("Bruger {} til rollefordeling.\n".format( fname ) )
+    role_rows = rows_from_csv_etc( fname )
+    
+    # prøv at gætte sammenhængen mellem nummer-navne i
+    # rollefordelingsfilen og manuskriptfilerne, med fuzzy
+    # matching, se https://pypi.org/project/fuzzywuzzy/
+    materials = [ material for act in revue.acts
+                  for material in act.materials ]
+    
+    def rolename_when_exists( title, abbr ):
+        try:
+            return rolenamedict[ title ][ abbr ]
+        except:
+            return ""
 
-    except FileNotFoundError as e:
-        print("""
-Kunne ikke finde csv-filen til rollefordeling:
-({})
-""".format( fname )
-        )
-        raise e
-
-    else:
-        # prøv at gætte sammenhængen mellem nummer-navne i
-        # rollefordelingsfilen og manuskriptfilerne, med fuzzy
-        # matching, se https://pypi.org/project/fuzzywuzzy/
-        materials = [ material for act in revue.acts
-                      for material in act.materials ]
-
-        def rolename_when_exists( title, abbr ):
-            try:
-                return rolenamedict[ title ][ abbr ]
-            except:
-                return ""
-
-        scorechart = {
-            row[0]: {
-                "scores": [ fuzz.partial_ratio( material.title, row[0] )
-                            for material in materials ],
-                "roles": [ Role( abbr, name,
-                                 rolename_when_exists( row[0], abbr ) )
-                           for abbr, name in zip(
-                                   row[1:], role_rows[0][1:]
-                           ) if abbr
-                ]
-            }
-            for row in role_rows[1:]
+    scorechart = {
+        row[0]: {
+            "scores": [ fuzz.partial_ratio( material.title, row[0] )
+                        for material in materials ],
+            "roles": [ Role( abbr, name,
+                             rolename_when_exists( row[0], abbr ) )
+                       for abbr, name in zip(
+                               row[1:], role_rows[0][1:]
+                       ) if abbr
+            ]
         }
-        translations = {}
-        return { "translations": translations, "scorechart": scorechart }
+        for row in role_rows[1:]
+    }
+    translations = {}
+    return { "translations": translations, "scorechart": scorechart }
 
 @dataclass
 class RolesFormat:
@@ -172,15 +161,13 @@ formats = [
     RolesFormat( name = "pdf-matrix",
                  default_filename = "roller.csv",
                  reader = pdf_matrix,
-                 description = """
-Ligesom formatet i rolleoversigten, som bliver sat i manuskriptet.
-"""
+                 description = """\
+Ligesom formatet i rolleoversigten, som bliver sat i manuskriptet."""
                 ),
     RolesFormat( name = "overview",
                  default_filename = "roles.csv",
                  reader = rowwise_csv,
-                 description = """"
-Det format, som kommer ud af kommandoen roles-sheet til create.
-"""
+                 description = """\
+Det format, som kommer ud af kommandoen roles-sheet til create."""
                 )
 ]

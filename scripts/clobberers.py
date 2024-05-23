@@ -1,5 +1,7 @@
 import re
 import os
+from operator import itemgetter
+from pathlib import Path
 from base_classes import Role
 from tex import TeX
 from roles_reader import formats
@@ -58,76 +60,122 @@ class ClobberInstructions:
 class RoleDistribution( ClobberInstructions ):
     # automatisk rollefordeling.
     cmd = "role-distribution"
-    doc = "Skriver rollefordelingen (fra roller.csv) ind i .tex-filerne"
+    doc = "Skriver rollefordelingen ind i .tex-filerne, hvis angivet i konfigurationen."
     
     @staticmethod
     def init( revue ):
 
         active_formats = [ form for form in formats
-                           if revue.conf.has_option( "Files", form.name ) ]\
-                          or formats # if ^ is empty
+                           if revue.conf.conf.has_option( "Files", form.name )
+                          ]
 
-        interpretations = []
-        for form in active_formats:
-            try:
-                interpretations += form.reader(
-                    revue.conf.get( "Files", form.name,
-                                    fallback = form.default_filename )
-                )
-            except FileNotFoundError:
-                pass
-        
-        if len( interpretations ) = 0:
-            print("Kunne ikke læse nogen filer til rollefordeling:\n")
-            for form in active_formats:
-                print( "{}\n".format( form.default_filename ) )
-            print("Så det springer vi over denne gang.")
+        if len( active_formats ) != 1:
+            if len( active_formats ) == 0:
+                print( "Ingen rollefordelingsfiler er angivet." )
+            else:
+                print( "For mange rollefordelingsfiler er angivet:" )
+                for form in active_formats:
+                    print( "    {} = {}".format(
+                        form.mane, revue.conf.conf.get( "Files", form.name )
+                    ))
+
             clobber_steps[ "role-distribution" ] = ClobberInstructions
+            print( "Så rollefordelingen bliver sprunget over denne gang." )
             return
-        elif 
-        else:
 
-            while scorechart:
-                # tag gættet med den højeste sikkerhed hver gang,
-                # og fjern den tilhørende række og kolonne fra
-                # tabellen
-                best = max( scorechart,
-                            key=lambda key: max(
-                                scorechart[ key ][ "scores" ]
-                            ))
-                maxindex = scorechart[ best ][ "scores"
-                ].index( max( scorechart[ best ][ "scores" ]))
-                translations[ best ] = {
-                    "material": materials[ maxindex ],
-                    "conf": scorechart[ best ][ "scores" ][ maxindex ],
-                    "roles": scorechart[ best ][ "roles" ]
-                }
-                for name in scorechart:
-                    scorechart[ name ][ "scores" ][ maxindex ] = 0
-                del scorechart[ best ]
-                # TODO: find på bedre navne end 'best' og 'maxindex'
+        active_format = active_formats[0]
+        materials = [ material for act in revue.acts \
+                      for material in act.materials ]
+        try:
+            translations, scorechart = \
+                itemgetter("translations","scorechart")(
+                    active_format.reader(
+                        revue.conf.conf.get(
+                            "Files", active_format.name,
+                            fallback = active_format.default_filename ),
+                        revue
+                    )
+                )
+        except FileNotFoundError:
+            print("Kunne ikke læse filen til rollefordeling: {}".format(
+                revue.conf.conf.get( "Files", active_format.name,
+                                     fallback = active_format.default_filename )
+            ))
+            clobber_steps[ "role-distribution" ] = ClobberInstructions
+            print("Så rollefordelingen bliver sprunget over denne gang.")
+            return
 
-            # lad den TeX-ansvarlige tage stilling til, hvad der
-            # kommer til at ske
+        print("Rollefordelingsfilen er {}, som burde have formatet '{}'"\
+              .format(
+                  revue.conf.conf.get(
+                      "Files", active_format.name,
+                      fallback = active_format.default_filename
+                  ),
+                  active_format.name
+              )
+              )
+
+        if len( translations ) > 0:
             print("""
+Følgende materialer er nævnt ved filnavn i rollefordelingsfilen:
+
+Filnavn:                                Titel:
+--------                                ------""")
+            for t in translations:
+                print( "{:<39} {:<39}".format(
+                    Path( translations[t]["material"].path )\
+                        .relative_to( Path.cwd() )\
+                        .as_posix()[:39],
+                    translations[t]["material"].title[:40]
+                ) )
+
+        if len( scorechart ) > 0:
+            print("""
+Følgende materialer er matchet efter titel:
+
 Navn i fordelingsfil:              => Skh.: Titel på gæt:
 --------------------                  ----  ------------""")
-            for t in translations:
+
+        while scorechart:
+            # tag gættet med den højeste sikkerhed hver gang,
+            # og fjern den tilhørende række og kolonne fra
+            # tabellen
+            best = max( scorechart,
+                        key=lambda key: max(
+                            scorechart[ key ][ "scores" ]
+                        ))
+            maxindex = scorechart[ best ][ "scores" ]\
+                .index( max( scorechart[ best ][ "scores" ]))
+            translations[ best ] = {
+                "material": materials[ maxindex ],
+                "conf": scorechart[ best ][ "scores" ][ maxindex ],
+                "roles": scorechart[ best ][ "roles" ]
+            }
+            for name in scorechart:
+                scorechart[ name ][ "scores" ][ maxindex ] = 0
+            del scorechart[ best ]
+            # TODO: find på bedre navne end 'best' og 'maxindex'
+            
+        # lad den TeX-ansvarlige tage stilling til, hvad der
+        # kommer til at ske
+        for t in translations:
+            if translations[t]["conf"] != "fn":
                 print("{:<35}=> ({:>3}) {:<36}".format(
                     t[:35],
                     translations[t]["conf"],
                     translations[t]["material"].title[:36]
                 ))
             
-            return { translations[t]["material"].title:
-                     translations[t][ "roles" ]
-                     for t in translations }
+        return { translations[t]["material"].title:
+                 translations[t][ "roles" ]
+                 for t in translations }
 
     warn = """
-Vi prøver at gætte på hvilket nummer hver linje i rolle-filen
-refererer til, ved at sammenligne navnet med titlerne på de numre, vi
-kender. Du kan se vores gæt ovenfor, sammen med et tal for hvor sikre
-vi er. Hvis vores gæt ikke er rigtige, er det nu, du skal springe fra.
+Vi prøver at gætte, hvilke numre rollefordelingsfilen refererer til,
+hvis den ikke indeholder filnavne, ved at sammenligne navnet med
+titlerne på de numre, vi kender. Du kan se vores gæt ovenfor, sammen
+med et tal for hvor sikre vi er. Hvis vores gæt ikke er rigtige, er
+det nu, du skal springe fra.
 """
     
     @staticmethod
@@ -370,17 +418,21 @@ def clobber_my_tex( revue, args ):
     initresults = { cmd: clobber_steps[ cmd ].init( revue )
                     for cmd in clobber_steps if cmd in args
     }
-    cont = input(
-        stoptext.format(
-            "\n".join( "  " + arg for arg in clobber_steps if arg in args ),
-            "\n".join([
-                clobber_steps[ arg ].warn for arg in clobber_steps if (
-                    arg in args
-                    # ingen linjeskift for tomme strenge
-                    and clobber_steps[ arg ].warn 
-            )
-        ]) + "\n" )
-    ) if not '-y' in args else 'y' # spring advarsel over
+    cont = "y" if revue.conf.conf.getboolean( "Behaviour", "always say yes",
+                                              fallback = False ) \
+        else input(
+                stoptext.format(
+                    "\n".join(
+                        "  " + arg for arg in clobber_steps if arg in args
+                    ),
+                    "\n".join([
+                        clobber_steps[ arg ].warn for arg in clobber_steps if (
+                            arg in args
+                            # ingen linjeskift for tomme strenge
+                            and clobber_steps[ arg ].warn 
+                        )
+                    ]) + "\n" )
+        )
     
     if cont == 'y':
         tex = TeX( revue )
