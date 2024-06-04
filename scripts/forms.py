@@ -13,6 +13,7 @@ from ics import Calendar, Event
 from ics.grammar.parse import ParseError
 from pytz import timezone
 
+from classy_revy import Act, Material
 from config import configuration
 conf = configuration.conf
 
@@ -343,18 +344,24 @@ def magic( item, placeholder, replacements,
     item, placeholder, replc_stringifyer( replacements[0] ), repeat_magic
   )[1] ]
 
+placeholder_info = (
+  { "type": Act,
+    "placeholder": "AKTTITEL",
+    "magic": lambda item, act: magic( item, "ACT", lambda act: act.name )
+   }
+)
 
-
-def revy( items, current_ladder ):
+def revy( items, replacements ): # think revy.acts
   output = []
   pen = []
   maybe_pen = []
   for item in items:
-    if current_ladder[0] in walk_item( item ):
+    discovery = walk_item( item )
+    if replacements[0]["placeholder"] in discovery:
       output += revy( pen + maybe_pen, current_ladder[1:] )
       pen = [ item ]
       maybe_pen = []
-    elif any( found in current_ladder for found in walk_item( item ) ):
+    elif any( info["placeholder"] in discovery for info in replacements[1:] ):
       pen += maybe_pen + [ item ]
       maybe_pen = []
     else:
