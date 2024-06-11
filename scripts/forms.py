@@ -9,6 +9,7 @@ from apiclient import discovery
 from httplib2 import Http
 from oauth2client import client, file, tools
 from oauth2client.clientsecrets import InvalidClientSecretsError
+from googleapiclient.errors import HttpError
 from ics import Calendar, Event
 from ics.grammar.parse import ParseError
 from pytz import timezone
@@ -28,33 +29,7 @@ store = file.Storage( conf.get( "Forms", "token json",
 
 form_service = None
 template_form = None
-
-try:
-  template_form = form_service\
-    .forms()\
-    .get( formId = conf.get( "Forms", "template forms id" ) )\
-    .execute()
-except (NoSectionError, NoOptionError): # but what if wrong id ???????
-  if type( e ) == NoSectionError:
-    conf.add_section( "Forms" )
-  template_form_id = input("""
-Den nye google-form skal baseres på en eksisterende form, hvor der
-er sat mærker ind der, hvor vores autogenererede indhold skal sættes
-ind. Se
-https://docs.google.com/forms/d/1HmrpySe-A8ZwzpfNnOkLiGjHGizxZ6KAnJrEh-Rk2LM/edit
-for et eksempel. Forms-skabelonen bliver ikke ændret. Vi laver en kopi
-med det autogenererede indhold i stedet.
-
-forms-id: [{}]: """.format( DEFAULT_TEMPLATE_FORM_ID )
-  ) or DEFAULT_TEMPLATE_FORM_ID
   
-
-new_form = {}
-new_form["info"] = {}
-new_form["info"]["title"] = \
-  template_form["info"]["title"] + " genereret af FysikRevyTeX"
-new_form["info"]["documentTitle"] = \
-  template_form["info"]["documentTitle"] + " genereret af FysikRevyTeX"
 
 def walk_item( item ):
   if type( item ) == dict:
@@ -376,7 +351,7 @@ def google_form_setup():
         conf.add_section( "Forms" )
       if type( e ) in [ NoSectionError, NoOptionError ]:
         print("Programmet skal bruge en fil med credentials til Google.")
-      if type( e ) == InvalidClientSectionError:
+      if type( e ) == InvalidClientSecretsError:
         print("Det ser ikke ud til, at '{}'".format(
           conf.get( "Forms", "credentials json" )
         ))
@@ -400,10 +375,51 @@ Credentials-fil [{}]: """.format( CREDENTIALS_DEFAULT_FILE_NAME )
       static_discovery=False,
   )
 
+  while True:
+    try:
+      template_form = form_service\
+        .forms()\
+        .get( formId = conf.get( "Forms", "template forms id" ) )\
+        .execute()
+      break
+    except ( NoSectionError, NoOptionError, HttpError ) as e:
+      if type( e ) == NoSectionError:
+        conf.add_section( "Forms" )
+      if type( e ) in ( NoSectionError, NoOptionError ):
+        print("""
+Den nye google-form skal baseres på en eksisterende form, hvor der
+er sat mærker ind der, hvor vores autogenererede indhold skal sættes
+ind. Se
+https://docs.google.com/forms/d/{}/edit
+for et eksempel. Forms-skabelonen bliver ikke ændret. Vi laver en kopi
+med det autogenererede indhold i stedet."""\
+              .format( DEFAULT_TEMPLATE_FORM_ID )
+              )
+      if type( e ) == HttpError:
+        print("\nKan ikke hente den angivne Form:")
+        print( e )
+
+      template_form_id = conf.get( "Forms", "template forms id",
+                                   fallback = DEFAULT_TEMPLATE_FORM_ID )
+      conf.set( "Forms", "template forms id",
+                input( "\nforms-id: [{}]: ".format( template_form_id ) ) \
+                or template_form_id
+               )
+  
+  return form_service, template_form
 
 def new_form_from_template( revue ):
   
-  result = form_service.forms().create( body = new_form ).execute()
+  result = form_service\
+    .forms()\
+    .create( body = {
+      "info": {
+        "title": template_form["info"]["title"] + " genereret af FysikRevyTex",
+        "documentTitle": template_form["info"]["documentTitle"]\
+                         + " genereret af FysikRevyTex",
+        }
+    } )\
+    .execute()
   form_service.forms().batchUpdate(
     formId = result["formId"],
     body = {
@@ -430,4 +446,4 @@ def new_form_from_template( revue ):
     for item in conf.items("Forms"):
       print( "{} = {}".format( *item ) )
 
-google_form_setup()
+form_service, template_form = google_form_setup()
