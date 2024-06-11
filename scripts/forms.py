@@ -14,47 +14,29 @@ from ics.grammar.parse import ParseError
 from pytz import timezone
 
 from classy_revy import Act, Material
+from base_classes import Role
 from config import configuration
 conf = configuration.conf
 
 SCOPES = "https://www.googleapis.com/auth/forms.body"
 DISCOVERY_DOC = "https://forms.googleapis.com/$discovery/rest?version=v1"
+CREDENTIALS_DEFAULT_FILE_NAME = "credentials.json"
+DEFAULT_TEMPLATE_FORM_ID = "1HmrpySe-A8ZwzpfNnOkLiGjHGizxZ6KAnJrEh-Rk2LM"
 
 store = file.Storage( conf.get( "Forms", "token json",
                                 fallback = "token.json" ) )
-cred_file = conf.get( "Forms", "credentials json",
-                      fallback = "credentials.json" )
 
-while True:
-  try:
-    creds = tools.run_flow(
-      client.flow_from_clientsecrets( cred_file, SCOPES ),
-      store
-    )
-    break
-  except InvalidClientSecretsError as e:
-    if e.args[0] == "Error opening file":
-      cred_file = input( """
-Det ser ikke ud til, at '{}' er filen med credentials til Google. Hvis
-du ikke har sådan en fil endnu, så er der instruktioner her:
-https://developers.google.com/forms/api/quickstart/python#set_up_your_environment
-
-Credentials-fil [{}]: """.format( cred_file, cred_file ) ) or cred_file
-    else:
-      raise e
-
-form_service = discovery.build(
-    "forms",
-    "v1",
-    http=creds.authorize(Http()),
-    discoveryServiceUrl=DISCOVERY_DOC,
-    static_discovery=False,
-)
+form_service = None
+template_form = None
 
 try:
-  template_form_id = conf.get( "Forms", "template forms id" )
-except (NoSectionError, NoOptionError):
-  default_template_form_id = "1HmrpySe-A8ZwzpfNnOkLiGjHGizxZ6KAnJrEh-Rk2LM"
+  template_form = form_service\
+    .forms()\
+    .get( formId = conf.get( "Forms", "template forms id" ) )\
+    .execute()
+except (NoSectionError, NoOptionError): # but what if wrong id ???????
+  if type( e ) == NoSectionError:
+    conf.add_section( "Forms" )
   template_form_id = input("""
 Den nye google-form skal baseres på en eksisterende form, hvor der
 er sat mærker ind der, hvor vores autogenererede indhold skal sættes
@@ -63,17 +45,16 @@ https://docs.google.com/forms/d/1HmrpySe-A8ZwzpfNnOkLiGjHGizxZ6KAnJrEh-Rk2LM/edi
 for et eksempel. Forms-skabelonen bliver ikke ændret. Vi laver en kopi
 med det autogenererede indhold i stedet.
 
-forms-id: [{}]: """.format( default_template_form_id )
-  ) or default_template_form_id
+forms-id: [{}]: """.format( DEFAULT_TEMPLATE_FORM_ID )
+  ) or DEFAULT_TEMPLATE_FORM_ID
   
-template_form = form_service.forms().get( formId = template_form_id ).execute()
-new_form = {}
 
+new_form = {}
 new_form["info"] = {}
 new_form["info"]["title"] = \
-  template_form["info"]["title"] + " fra FysikRevyTeX"
+  template_form["info"]["title"] + " genereret af FysikRevyTeX"
 new_form["info"]["documentTitle"] = \
-  template_form["info"]["documentTitle"] + " fra FysikRevyTeX"
+  template_form["info"]["documentTitle"] + " genereret af FysikRevyTeX"
 
 def walk_item( item ):
   if type( item ) == dict:
@@ -102,39 +83,6 @@ def copy_tree( tree ):
     return { key: copy_tree( value )
              for (key,value) in tree if "Id" not in key }
   return tree
-
-class FoundIt( Exception ):
-  pass
-
-def copy_tree_replace_placeholder_or_listfunc(
-    tree, placeholder, replacement, listfunc
-):
-  if type( tree ) == list:
-    return ( False, listfunc( tree ) )
-  if type( tree ) == dict:
-    new_dict = {}
-    it_was_found = False
-    for key in tree:
-      if "Id" in key:
-        continue
-
-      found_it, branch_copy = copy_tree_replace_placeholder_or_listfunc(
-        tree[ key ], placeholder, replacement, listfunc
-      )
-
-      new_dict[ key ] = branch_copy
-      it_was_found = it_was_found or found_it
-
-    return ( it_was_found, new_dict )
-
-  try:
-    if "<+" + placeholder + "+>" in tree:
-      return ( True, tree.replace( "<+" + placeholder + "+>", replacement ) )
-  except TypeError as e:
-    if "is not iterable" not in e.args[0]:
-      raise e
-
-  return ( False, tree )
 
 @cache
 def planned_times():
@@ -273,183 +221,213 @@ Form, så kan du skrive et nyt interval nu. Fx er de næste 90 dage:
         "Forms", "filter all day events",
         input("\nFiltrér heldagsbegivenheder fra? yes/[no]: ").strip() or "no"
       )
-  
-def mødetidspunkt( item ):
-  if type( item ) == dict:
-    did_replacement, new_item = copy_tree_replace_placeholder_or_listfunc(
-      item, "MØDETIDSPUNKT", planned_times()[0], mødetidspunkt
-    )
 
-    if did_replacement:
-      return [ new_item ] + [ copy_tree_replace_placeholder_or_listfunc(
-        item, "MØDETIDSPUNKT", planned_time, mødetidspunkt
-      )[1] for planned_time in planned_times()[1:] ]
-    else:
-      return [ new_item ]
-    
-  if type( item ) == list:
-    return [ new_el for el in item for new_el in mødetidspunkt( el ) ]
+def copy_tree_replace_placeholder_or_listfunc(
+    tree, placeholder, replacement, listfunc
+):
+  if type( tree ) == list:
+    return ( False, listfunc( tree ) )
+  if type( tree ) == dict:
+    new_dict = {}
+    it_was_found = False
+    for key in tree:
+      if "Id" in key:
+        continue
 
-  return [ copy_tree_replace_placeholder_or_listfunc(
-    item, "MØDETIDSPUNKT", planned_times()[0], mødetidspunkt,
-  )[1] ]
-
-def act( item, akt ):
-  if type( item ) == list:
-    return [ new_el for el in item for new_el in act( el, akt ) ]
-  if type( item ) == dict:
-    did_replacement, new_item = copy_tree_replace_placeholder_or_listfunc(
-      item, "AKTTITEL", akt[0].name, lambda oi: act( oi, akt ) # closure?
-    )
-    return [ mats( new_item, akt[0].materials ) ] \
-      + ( [ mats(
-        copy_tree_replace_placeholder_or_listfunc(
-          item, "AKTTITEL", akt_i.name, lambda oi: act( oi, akt_i )
-        )) for akt_i in akt[1:]
-           ] if did_replacement else []
-         )
-  return [ copy_tree_replace_placeholder_or_listfunc(
-    item, "AKTTITEL", akt[0].name, lambda oi: act( oi, akt )
-  )[1] ]
-
-def magic( item, placeholder, replacements,
-           replc_stringifyer = lambda *args: args[0],
-           sub_magic = lambda *args: args[0]
-          ):
-  def repeat_magic( sub_item ):
-    return magic( sub_item, placeholder, replacements,
-                  replc_stringifyer, sub_magic
-                 )
-  
-  if type( item ) == list:
-    return [ new_el for el in item for new_el in repeat_magic( el ) ]
-  if type( item ) == dict:
-    did_replacement, new_item = copy_tree_replace_placeholder_or_listfunc(
-      item, placeholder, replc_stringifyer( replacements[0] ), repeat_magic
-    )
-
-    return [ sub_magic( new_item, replacements[0] ) ] \
-      + (
-        [
-          sub_magic(
-            copy_tree_replace_placeholder_or_listfunc(
-              item, placeholder, replc_stringifyer( replacement ), repeat_magic
-            )[1],
-            replacement
-          ) for replacement in replacements[1:]
-        ] if did_replacement else []
+      found_it, branch_copy = copy_tree_replace_placeholder_or_listfunc(
+        tree[ key ], placeholder, replacement, listfunc
       )
 
-  return [ copy_tree_replace_placeholder_or_listfunc(
-    item, placeholder, replc_stringifyer( replacements[0] ), repeat_magic
-  )[1] ]
+      new_dict[ key ] = branch_copy
+      it_was_found = it_was_found or found_it
+
+    return ( it_was_found, new_dict )
+
+  try:
+    if "<+" + placeholder + "+>" in tree:
+      return ( True, tree.replace( "<+" + placeholder + "+>", replacement ) )
+  except TypeError as e:
+    if "is not iterable" not in e.args[0]:
+      raise e
+
+  return ( False, tree )
 
 placeholder_info = (
   { "type": Act,
     "placeholder": "AKTTITEL",
-    "magic": lambda item, act: magic( item, "ACT", lambda act: act.name )
-   }
+    "namer": lambda act: act.name,
+    "level_down": lambda act: act.materials
+   },
+  { "type": Material,
+    "placeholder": "MATERIALETITEL",
+    "namer": lambda mat: mat.title,
+    "level_down": lambda mat: mat.roles
+   },
+  { "type": Role,
+    "placeholder": "ROLLE",
+    "namer": lambda role: \
+      role.abbreviation + ( " ({})".format( role.role ) if role.role else "" ),
+    "level_down": lambda arg: []
+   },
 )
 
-def revy( items, replacements ): # think revy.acts
+planned_times_info = (
+  { "type": str,
+    "placeholder": "MØDETIDSPUNKT",
+    "namer": lambda name: name,
+    "level_down": lambda arg: []
+   },
+)
+
+def revy( items, replacements, placeholder_info ): # think revy.acts
+  try:
+    revy_depth = [ info["type"] for info in placeholder_info ]\
+      .index( type( replacements[0] ) )
+  except IndexError:
+    return items
+  
   output = []
   pen = []
   maybe_pen = []
+
+  def replace_in_items( r_items ):
+    r_output = []
+    did_replacement = False
+    output_buffer = []
+    for replacement in replacements:
+
+      def sublist_discriminate( sub_list ):
+        sub_placeholders = walk_item( sub_list )
+        if placeholder_info[ revy_depth ]["placeholder"] \
+           in sub_placeholders:
+          return revy( sub_list, replacements, placeholder_info )
+        try:
+          if placeholder_info[ revy_depth + 1 ]["placeholder"] \
+             in sub_placeholders:
+            return revy(
+              sub_list,
+              placeholder_info[ revy_depth ]["level_down"]( replacement ),
+              placeholder_info
+            )
+        except IndexError:
+          pass
+        return sub_list
+
+      for current_item in r_items:
+        repd, new_item = copy_tree_replace_placeholder_or_listfunc(
+          current_item,
+          placeholder_info[ revy_depth ]["placeholder"],
+          placeholder_info[ revy_depth ]["namer"]( replacement ),
+          sublist_discriminate
+        )
+
+        did_replacement = repd or did_replacement
+        output_buffer += [ new_item ]
+
+      if not did_replacement:
+        break
+
+      r_output += revy(
+        output_buffer,
+        placeholder_info[ revy_depth ]["level_down"]( replacement ),
+        placeholder_info
+      )
+      output_buffer = []
+
+    else:                       # no break
+      return r_output + output_buffer
+
+    return revy(
+      output_buffer,
+      [ sub_rep for rep in replacements
+        for sub_rep in placeholder_info[ revy_depth ]["level_down"]( rep )
+       ],
+      placeholder_info
+    )
+  
   for item in items:
     discovery = walk_item( item )
-    if replacements[0]["placeholder"] in discovery:
-      output += revy( pen + maybe_pen, current_ladder[1:] )
+    if placeholder_info[ revy_depth ]["placeholder"] in discovery:
+      output += replace_in_items( pen + maybe_pen )
       pen = [ item ]
       maybe_pen = []
-    elif any( info["placeholder"] in discovery for info in replacements[1:] ):
+    elif any( info["placeholder"] in discovery
+              for info in placeholder_info[ revy_depth + 1: ] ):
       pen += maybe_pen + [ item ]
       maybe_pen = []
     else:
       maybe_pen += [ item ]
 
-  if current_ladder:
-    output += revy( pen, current_ladder[1:] )
+  output += replace_in_items( pen ) + maybe_pen
   return output
 
-for item in template_form["items"]:
-  for key in item:
-    if "Id" in key:
-      continue
-    for placeholder in walk_item( item ):
-      # active_items[ placeholder ].add( item )
-      pass
-      # well, that doesn't work...
+def google_form_setup():
+  while True:
+    try:
+      creds = tools.run_flow(
+        client.flow_from_clientsecrets(
+          conf.get( "Forms", "credentials json" ), SCOPES
+        ),
+        store
+      )
+      break
+    except ( InvalidClientSecretsError, NoSectionError, NoOptionError ) as e:
+      if type( e ) == NoSectionError:
+        conf.add_section( "Forms" )
+      if type( e ) in [ NoSectionError, NoOptionError ]:
+        print("Programmet skal bruge en fil med credentials til Google.")
+      if type( e ) == InvalidClientSectionError:
+        print("Det ser ikke ud til, at '{}'".format(
+          conf.get( "Forms", "credentials json" )
+        ))
+        print("er filen med credentials til Google.")
 
-if conf.has_section( "Forms" ):
-  print( "\n[Forms]" )
-  for item in conf.items("Forms"):
-    print( "{} = {}".format( *item ) )
+      conf.set( "Forms", "credentials json", (
+        input( """\
+Hvis du ikke har sådan en fil endnu, så er der instruktioner her:
+https://developers.google.com/forms/api/quickstart/python#set_up_your_environment
 
-# new_form["items"] = []
-# for item in template_form["items"]:
+Credentials-fil [{}]: """.format( CREDENTIALS_DEFAULT_FILE_NAME )
+              )
+        or CREDENTIALS_DEFAULT_FILE_NAME
+      ))
 
-#   new_item = {}
+  form_service = discovery.build(
+      "forms",
+      "v1",
+      http=creds.authorize(Http()),
+      discoveryServiceUrl=DISCOVERY_DOC,
+      static_discovery=False,
+  )
+
+
+def new_form_from_template( revue ):
   
-#   if item in all_active_items:
-#     if item in active_items["MÆDETIDSPUNKT"]:
-      
-#   else:
-#     for entry in item:
-#       if "Id" in entry:
-#         continue
-#       new_item[ entry ] = copy_tree( item[ entry ] )
-      
-#   new_form["items"] += [ new_item ]
+  result = form_service.forms().create( body = new_form ).execute()
+  form_service.forms().batchUpdate(
+    formId = result["formId"],
+    body = {
+      "requests": [
+        {
+          "createItem": {
+            "item": item,
+            "location": {"index": i}
+          }
+        }
+        for i,item in enumerate(
+            revy(
+              revy( template_form["items"], revue.acts, placeholder_info ),
+              planned_times(),
+              planned_times_info
+            )
+        )
+      ]
+    }
+  ).execute()
 
-# # Request body for creating a form
-# NEW_FORM = {
-#     "info": {
-#         "title": "Quickstart form",
-#     }
-# }
+  if conf.has_section( "Forms" ):
+    print( "\n[Forms]" )
+    for item in conf.items("Forms"):
+      print( "{} = {}".format( *item ) )
 
-# # Request body to add a multiple-choice question
-# NEW_QUESTION = {
-#     "requests": [
-#         {
-#             "createItem": {
-#                 "item": {
-#                     "title": (
-#                         "In what year did the United States land a mission on"
-#                         " the moon?"
-#                     ),
-#                     "questionItem": {
-#                         "question": {
-#                             "required": True,
-#                             "choiceQuestion": {
-#                                 "type": "RADIO",
-#                                 "options": [
-#                                     {"value": "1965"},
-#                                     {"value": "1967"},
-#                                     {"value": "1969"},
-#                                     {"value": "1971"},
-#                                 ],
-#                                 "shuffle": True,
-#                             },
-#                         }
-#                     },
-#                 },
-#                 "location": {"index": 0},
-#             }
-#         }
-#     ]
-# }
-
-# # Creates the initial form
-# result = form_service.forms().create(body=NEW_FORM).execute()
-
-# # Adds the question to the form
-# question_setting = (
-#     form_service.forms()
-#     .batchUpdate(formId=result["formId"], body=NEW_QUESTION)
-#     .execute()
-# )
-
-# # Prints the result to show the question has been added
-# get_result = form_service.forms().get(formId=result["formId"]).execute()
-# print(get_result)
+google_form_setup()
