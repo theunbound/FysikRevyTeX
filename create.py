@@ -16,6 +16,7 @@ from tex import TeX
 from clobberers import clobber_steps, clobber_my_tex
 from pdf import PDF
 import roles_reader
+from forms import create_new_form
 
 from config import configuration as conf
 
@@ -267,7 +268,12 @@ actions = [
     Argument( "roles-sheet",
               "Lav en csv(/tsv) fil med en oversigt over rollerne.",
               lambda tex: roles_csv( revue )
-              )
+              ),
+
+    Argument( "google-forms-signup",
+              "Skriv roller og revydage ind i en Google Forms tilmeldingsformular.",
+              lambda tex: create_new_form( revue )
+             )
     ]
 
 def create_parts(revue, args):

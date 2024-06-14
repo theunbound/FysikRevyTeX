@@ -3,6 +3,10 @@ from functools import cache
 from urllib import request
 from urllib.error import URLError
 from datetime import datetime, date, timedelta
+from dataclasses import dataclass
+from typing import Callable
+from argparse import ArgumentParser
+from sys import argv
 import re, urllib
 
 from apiclient import discovery
@@ -17,7 +21,30 @@ from pytz import timezone
 from classy_revy import Act, Material
 from base_classes import Role
 from config import configuration
+
+# Setup & constants
+
 conf = configuration.conf
+
+@dataclass
+class PlaceholderInfo():
+  type: type
+  placeholder: str
+  namer: Callable[..., str]
+  level_down: Callable[..., list]
+
+class PlaceholderInfoLadder( tuple ):
+  def __new__( cls, *args ):
+    wrong = [ ( i, arg ) for i, arg in enumerate( args )
+              if type( arg ) != PlaceholderInfo
+             ]
+    if len( wrong ):
+      raise TypeError(
+        "Some arguments are not PlaceholderInfo's (arg index, argument):",
+        *wrong
+      )
+    
+    return super( PlaceholderInfoLadder, cls ).__new__( cls, args )
 
 SCOPES = "https://www.googleapis.com/auth/forms.body"
 DISCOVERY_DOC = "https://forms.googleapis.com/$discovery/rest?version=v1"
@@ -27,9 +54,36 @@ DEFAULT_TEMPLATE_FORM_ID = "1HmrpySe-A8ZwzpfNnOkLiGjHGizxZ6KAnJrEh-Rk2LM"
 store = file.Storage( conf.get( "Forms", "token json",
                                 fallback = "token.json" ) )
 
-form_service = None
-template_form = None
-  
+revy_classes_info = PlaceholderInfoLadder(
+  PlaceholderInfo( type = Act,
+                   placeholder = "AKTTITEL",
+                   namer = lambda act: act.name,
+                   level_down = lambda act: act.materials
+                  ),
+  PlaceholderInfo( type = Material,
+                   placeholder = "MATERIALETITEL",
+                   namer = lambda mat: mat.title,
+                   level_down = lambda mat: mat.roles
+                  ),
+  PlaceholderInfo( type = Role,
+                   placeholder = "ROLLE",
+                   namer = lambda role: \
+                   role.abbreviation \
+                     + ( " ({})".format( role.role ) if role.role else "" ),
+                   level_down = lambda arg: []
+                  ),
+)
+
+planned_times_info = PlaceholderInfoLadder(
+  PlaceholderInfo( type = str,
+                   placeholder = "MØDETIDSPUNKT",
+                   namer = lambda name: name,
+                   level_down = lambda arg: []
+                  ),
+)
+
+# 
+# Work functions
 
 def walk_item( item ):
   if type( item ) == dict:
@@ -51,13 +105,129 @@ def walk_item( item ):
     pass
   return set()
 
-def copy_tree( tree ):
+def copy_tree_replace_placeholder_or_listfunc(
+    tree, placeholder, replacement, listfunc
+):
   if type( tree ) == list:
-    return [ copy_tree( branch ) for branch in tree ]
+    return ( False, listfunc( tree ) )
   if type( tree ) == dict:
-    return { key: copy_tree( value )
-             for (key,value) in tree if "Id" not in key }
-  return tree
+    new_dict = {}
+    it_was_found = False
+    for key in tree:
+      if "Id" in key:
+        continue
+
+      found_it, branch_copy = copy_tree_replace_placeholder_or_listfunc(
+        tree[ key ], placeholder, replacement, listfunc
+      )
+
+      new_dict[ key ] = branch_copy
+      it_was_found = it_was_found or found_it
+
+    return ( it_was_found, new_dict )
+
+  try:
+    if "<+" + placeholder + "+>" in tree:
+      return ( True, tree.replace( "<+" + placeholder + "+>", replacement ) )
+  except TypeError as e:
+    if "is not iterable" not in e.args[0]:
+      raise e
+
+  return ( False, tree )
+
+def tree_replace_in( items, replacements, placeholder_info ):
+  try:
+    depth = [ info.type for info in placeholder_info ]\
+      .index( type( replacements[0] ) )
+  except IndexError:
+    return items
+  
+  output = []
+  pen = []
+  maybe_pen = []
+
+  def replace_in_items( r_items ):
+    r_output = []
+    did_replacement = False
+    output_buffer = []
+    for replacement in replacements:
+
+      def sublist_discriminate( sub_list ):
+        sub_placeholders = walk_item( sub_list )
+        if placeholder_info[ depth ].placeholder \
+           in sub_placeholders:
+          return tree_replace_in( sub_list, replacements, placeholder_info )
+        try:
+          if placeholder_info[ depth + 1 ].placeholder \
+             in sub_placeholders:
+            return tree_replace_in(
+              sub_list,
+              placeholder_info[ depth ].level_down( replacement ),
+              placeholder_info
+            )
+        except IndexError:
+          pass
+        return sub_list
+
+      for current_item in r_items:
+        repd, new_item = copy_tree_replace_placeholder_or_listfunc(
+          current_item,
+          placeholder_info[ depth ].placeholder,
+          placeholder_info[ depth ].namer( replacement ),
+          sublist_discriminate
+        )
+
+        did_replacement = repd or did_replacement
+        output_buffer += [ new_item ]
+
+      if not did_replacement:
+        break
+
+      r_output += tree_replace_in(
+        output_buffer,
+        placeholder_info[ depth ].level_down( replacement ),
+        placeholder_info
+      )
+      output_buffer = []
+
+    else:                       # no break
+      return r_output + output_buffer
+
+    return tree_replace_in(
+      output_buffer,
+      [ sub_rep for rep in replacements
+        for sub_rep in placeholder_info[ depth ].level_down( rep )
+       ],
+      placeholder_info
+    )
+  
+  for item in items:
+    discovery = walk_item( item )
+    if any( info.placeholder in discovery
+            for info in placeholder_info ):
+      pen += maybe_pen + [ item ]
+      maybe_pen = []
+    elif not pen:
+      output += [ item ]
+    else:
+      maybe_pen += [ item ]
+
+  output += replace_in_items( pen ) + maybe_pen
+  return output
+
+def summarize_conf():
+  if conf.has_section( "Forms" ):
+    print("""
+Her er de indstillinger, som vedrører Google Forms for tilmelding, som
+scriptet kender på nuværende tidspunkt, i et format, som kan
+sakse-klistres ind i revytex.conf, hvis du vil beholde dem:""")
+
+    print( "\n[Forms]" )
+    for item in conf.items("Forms"):
+      print( "{} = {}".format( *item ) )
+
+# 
+# Information import functions
 
 @cache
 def planned_times():
@@ -75,7 +245,7 @@ iCalendar-fil.
       calendar_location = conf.get( "Forms", "calendar file" )
       try:
         with urllib.request.urlopen( calendar_location ) as req:
-          revykalender = Calendar( req.read() )
+          revykalender = Calendar( req.read().decode("utf-8") )
           break
       except (ValueError, URLError):
         with open( calendar_location, "r", encoding="utf-8" ) as f:
@@ -83,9 +253,15 @@ iCalendar-fil.
           break
     except ( NoSectionError, NoOptionError,
              FileNotFoundError, OSError, ParseError ) as e:
+      if type( e ) == NoSectionError:
+        conf.add_section( "Forms" )
       explain()
       if type( e ) in [ NoSectionError, NoOptionError ]:
-        print("Du bliver nødt til at fortælle, hvor sådan en kan findes.")
+        print("""\
+Du bliver nødt til at fortælle, hvor sådan en kan findes.
+FysikRevyen™s Google-kalender har (i 2024) adressen
+https://calendar.google.com/calendar/ical/v49ctbqdptcl1p87r8aq2v4go4%40group.calendar.google.com/public/basic.ics
+""")
       else:
         print("Filen {}".format( conf.get( "Forms", "calendar file" ) ) )
       if type( e ) in [ FileNotFoundError, OSError ]:
@@ -197,153 +373,62 @@ Form, så kan du skrive et nyt interval nu. Fx er de næste 90 dage:
         input("\nFiltrér heldagsbegivenheder fra? yes/[no]: ").strip() or "no"
       )
 
-def copy_tree_replace_placeholder_or_listfunc(
-    tree, placeholder, replacement, listfunc
-):
-  if type( tree ) == list:
-    return ( False, listfunc( tree ) )
-  if type( tree ) == dict:
-    new_dict = {}
-    it_was_found = False
-    for key in tree:
-      if "Id" in key:
-        continue
-
-      found_it, branch_copy = copy_tree_replace_placeholder_or_listfunc(
-        tree[ key ], placeholder, replacement, listfunc
-      )
-
-      new_dict[ key ] = branch_copy
-      it_was_found = it_was_found or found_it
-
-    return ( it_was_found, new_dict )
-
-  try:
-    if "<+" + placeholder + "+>" in tree:
-      return ( True, tree.replace( "<+" + placeholder + "+>", replacement ) )
-  except TypeError as e:
-    if "is not iterable" not in e.args[0]:
-      raise e
-
-  return ( False, tree )
-
-placeholder_info = (
-  { "type": Act,
-    "placeholder": "AKTTITEL",
-    "namer": lambda act: act.name,
-    "level_down": lambda act: act.materials
-   },
-  { "type": Material,
-    "placeholder": "MATERIALETITEL",
-    "namer": lambda mat: mat.title,
-    "level_down": lambda mat: mat.roles
-   },
-  { "type": Role,
-    "placeholder": "ROLLE",
-    "namer": lambda role: \
-      role.abbreviation + ( " ({})".format( role.role ) if role.role else "" ),
-    "level_down": lambda arg: []
-   },
-)
-
-planned_times_info = (
-  { "type": str,
-    "placeholder": "MØDETIDSPUNKT",
-    "namer": lambda name: name,
-    "level_down": lambda arg: []
-   },
-)
-
-def revy( items, replacements, placeholder_info ): # think revy.acts
-  try:
-    revy_depth = [ info["type"] for info in placeholder_info ]\
-      .index( type( replacements[0] ) )
-  except IndexError:
-    return items
-  
-  output = []
-  pen = []
-  maybe_pen = []
-
-  def replace_in_items( r_items ):
-    r_output = []
-    did_replacement = False
-    output_buffer = []
-    for replacement in replacements:
-
-      def sublist_discriminate( sub_list ):
-        sub_placeholders = walk_item( sub_list )
-        if placeholder_info[ revy_depth ]["placeholder"] \
-           in sub_placeholders:
-          return revy( sub_list, replacements, placeholder_info )
-        try:
-          if placeholder_info[ revy_depth + 1 ]["placeholder"] \
-             in sub_placeholders:
-            return revy(
-              sub_list,
-              placeholder_info[ revy_depth ]["level_down"]( replacement ),
-              placeholder_info
-            )
-        except IndexError:
-          pass
-        return sub_list
-
-      for current_item in r_items:
-        repd, new_item = copy_tree_replace_placeholder_or_listfunc(
-          current_item,
-          placeholder_info[ revy_depth ]["placeholder"],
-          placeholder_info[ revy_depth ]["namer"]( replacement ),
-          sublist_discriminate
-        )
-
-        did_replacement = repd or did_replacement
-        output_buffer += [ new_item ]
-
-      if not did_replacement:
-        break
-
-      r_output += revy(
-        output_buffer,
-        placeholder_info[ revy_depth ]["level_down"]( replacement ),
-        placeholder_info
-      )
-      output_buffer = []
-
-    else:                       # no break
-      return r_output + output_buffer
-
-    return revy(
-      output_buffer,
-      [ sub_rep for rep in replacements
-        for sub_rep in placeholder_info[ revy_depth ]["level_down"]( rep )
-       ],
-      placeholder_info
-    )
-  
-  for item in items:
-    discovery = walk_item( item )
-    if placeholder_info[ revy_depth ]["placeholder"] in discovery:
-      output += replace_in_items( pen + maybe_pen )
-      pen = [ item ]
-      maybe_pen = []
-    elif any( info["placeholder"] in discovery
-              for info in placeholder_info[ revy_depth + 1: ] ):
-      pen += maybe_pen + [ item ]
-      maybe_pen = []
-    else:
-      maybe_pen += [ item ]
-
-  output += replace_in_items( pen ) + maybe_pen
-  return output
-
-def google_form_setup():
+def update_template_form():  
+  global template_form
   while True:
     try:
+      template_form = form_service\
+        .forms()\
+        .get( formId = conf.get( "Forms", "template forms id" ) )\
+        .execute()
+      break
+    except ( NoSectionError, NoOptionError, HttpError, NameError ) as e:
+      if type( e ) == NameError:
+        if "form_service" in e.args[0]:
+          setup_connection()
+        else:
+          raise e
+        continue
+      
+      if type( e ) == NoSectionError:
+        conf.add_section( "Forms" )
+      if type( e ) in ( NoSectionError, NoOptionError ):
+        print("""
+Den nye google-form skal baseres på en eksisterende form, hvor der
+er sat mærker ind der, hvor vores autogenererede indhold skal sættes
+ind. Se
+https://docs.google.com/forms/d/{}/edit
+for et eksempel. Forms-skabelonen bliver ikke ændret. Vi laver en kopi
+med det autogenererede indhold i stedet."""\
+              .format( DEFAULT_TEMPLATE_FORM_ID )
+              )
+      if type( e ) == HttpError:
+        print("\nKan ikke hente den angivne Form:")
+        print( e )
+
+      template_form_id = conf.get( "Forms", "template forms id",
+                                   fallback = DEFAULT_TEMPLATE_FORM_ID )
+      conf.set( "Forms", "template forms id",
+                input( "\nforms-id: [{}]: ".format( template_form_id ) ) \
+                or template_form_id
+               )
+
+#  
+# Setup functions
+
+def setup_connection():
+  while True:
+    try:
+      ap = ArgumentParser( parents = [tools.argparser] )
       creds = tools.run_flow(
         client.flow_from_clientsecrets(
           conf.get( "Forms", "credentials json" ), SCOPES
         ),
-        store
+        store,
+        flags = ap.parse_args( "--noauth_local_webserver"
+                               if "--noauth_local_webserver" in argv
+                               else ""
+                              )
       )
       break
     except ( InvalidClientSecretsError, NoSectionError, NoOptionError ) as e:
@@ -367,6 +452,7 @@ Credentials-fil [{}]: """.format( CREDENTIALS_DEFAULT_FILE_NAME )
         or CREDENTIALS_DEFAULT_FILE_NAME
       ))
 
+  global form_service
   form_service = discovery.build(
       "forms",
       "v1",
@@ -375,51 +461,35 @@ Credentials-fil [{}]: """.format( CREDENTIALS_DEFAULT_FILE_NAME )
       static_discovery=False,
   )
 
-  while True:
-    try:
-      template_form = form_service\
-        .forms()\
-        .get( formId = conf.get( "Forms", "template forms id" ) )\
-        .execute()
-      break
-    except ( NoSectionError, NoOptionError, HttpError ) as e:
-      if type( e ) == NoSectionError:
-        conf.add_section( "Forms" )
-      if type( e ) in ( NoSectionError, NoOptionError ):
-        print("""
-Den nye google-form skal baseres på en eksisterende form, hvor der
-er sat mærker ind der, hvor vores autogenererede indhold skal sættes
-ind. Se
-https://docs.google.com/forms/d/{}/edit
-for et eksempel. Forms-skabelonen bliver ikke ændret. Vi laver en kopi
-med det autogenererede indhold i stedet."""\
-              .format( DEFAULT_TEMPLATE_FORM_ID )
-              )
-      if type( e ) == HttpError:
-        print("\nKan ikke hente den angivne Form:")
-        print( e )
+def google_form_setup():
+  setup_connection()
+  update_template_form()
 
-      template_form_id = conf.get( "Forms", "template forms id",
-                                   fallback = DEFAULT_TEMPLATE_FORM_ID )
-      conf.set( "Forms", "template forms id",
-                input( "\nforms-id: [{}]: ".format( template_form_id ) ) \
-                or template_form_id
-               )
-  
-  return form_service, template_form
+#  
+# Functions that actually do stuff
 
-def new_form_from_template( revue ):
-  
-  result = form_service\
-    .forms()\
-    .create( body = {
-      "info": {
-        "title": template_form["info"]["title"] + " genereret af FysikRevyTex",
-        "documentTitle": template_form["info"]["documentTitle"]\
-                         + " genereret af FysikRevyTex",
+def new_form_from_template( template, revue ):
+  try:
+    result = form_service\
+      .forms()\
+      .create( body = {
+        "info": {
+          "title": template["info"]["title"] \
+                     + " genereret af FysikRevyTex",
+          "documentTitle": template["info"]["documentTitle"]\
+                             + " genereret af FysikRevyTex",
         }
-    } )\
-    .execute()
+      } )\
+      .execute()
+  except NameError as e:
+    if "form_service" in e.args[0]:
+      setup_connection()
+    elif "template_form" in e.args[0]:
+      update_template_form()
+    else:
+      raise e
+    return new_form_from_template( revue )
+
   form_service.forms().batchUpdate(
     formId = result["formId"],
     body = {
@@ -431,8 +501,11 @@ def new_form_from_template( revue ):
           }
         }
         for i,item in enumerate(
-            revy(
-              revy( template_form["items"], revue.acts, placeholder_info ),
+            tree_replace_in(
+              tree_replace_in( template["items"],
+                               revue.acts,
+                               revy_classes_info
+                              ),
               planned_times(),
               planned_times_info
             )
@@ -441,9 +514,6 @@ def new_form_from_template( revue ):
     }
   ).execute()
 
-  if conf.has_section( "Forms" ):
-    print( "\n[Forms]" )
-    for item in conf.items("Forms"):
-      print( "{} = {}".format( *item ) )
-
-form_service, template_form = google_form_setup()
+def create_new_form( revue ):
+  create_form_from_template( template_form )
+  summarize_conf()
