@@ -16,7 +16,7 @@ from tex import TeX
 from clobberers import clobber_steps, clobber_my_tex
 from pdf import PDF
 import roles_reader
-from forms import create_new_form
+from google-forms-signup import create_new_form
 
 from config import configuration as conf
 
