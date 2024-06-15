@@ -130,7 +130,7 @@ def roles_csv( revue ):
         mat.wordcounts = count
     
     try:
-        fn = conf["Files"]["role overview"]
+        fn = conf["Files"]["roles sheet output"]
     except KeyError:
         revue.write_roles_csv()
         print( "Wrote roles.csv (default name, can be set in revytex.conf)" )
@@ -292,6 +292,25 @@ flags = [
               verbose
               )
     ]
+
+def config_setter_for_format( form ):
+    return lambda setting: \
+        conf.conf.set( "Files", form.name, str( Path( setting ) ))
+
+role_settings = [
+    Argument( "--" + form.name,
+              form.description,
+              config_setter_for_format( form )
+             ) for form in roles_reader.formats
+]
+
+roles_sheet_filename = Argument(
+    "--roles-sheet-fn",
+    "Filnavn til output af rolle-oversigts-regneark fra roles-sheet.",
+    lambda fn: conf.conf.set( "Files", "roles sheet output", str( Path( fn ) ) )
+)
+
+settings = role_settings + [ roles_sheet_filename ]
 
 default_commands = (tuple() if conf.getboolean("TeXing","skip thumbindex")
                     else ("thumbindex",)) +\
