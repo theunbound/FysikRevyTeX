@@ -14,9 +14,6 @@ from httplib2 import Http
 from oauth2client import client, file, tools
 from oauth2client.clientsecrets import InvalidClientSecretsError
 from googleapiclient.errors import HttpError
-from ics import Calendar, Event
-from ics.grammar.parse import ParseError
-from pytz import timezone
 
 from classy_revy import Act, Material
 from base_classes import Role
@@ -231,6 +228,10 @@ sakse-klistres ind i revytex.conf, hvis du vil beholde dem:""")
 
 @cache
 def planned_times():
+  from ics import Calendar, Event
+  from ics.grammar.parse import ParseError
+  from pytz import timezone
+
   @cache
   def explain():
     print("""

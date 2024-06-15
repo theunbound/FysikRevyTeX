@@ -16,7 +16,6 @@ from tex import TeX
 from clobberers import clobber_steps, clobber_my_tex
 from pdf import PDF
 import roles_reader
-from google_forms_signup import create_new_form
 
 from config import configuration as conf
 
@@ -140,6 +139,10 @@ def roles_csv( revue ):
         return
     revue.write_roles_csv( fn )
     print( "Wrote {}".format( fn ))
+
+def google_forms_signup( tex ):
+    from google_forms_signup import create_new_form
+    create_new_form( revue )
 
 class Argument:
     def __init__(self, cmd, doc, action):
@@ -272,7 +275,7 @@ actions = [
 
     Argument( "google-forms-signup",
               "Skriv roller og revydage ind i en Google Forms tilmeldingsformular.",
-              lambda tex: create_new_form( revue )
+              google_forms_signup
              )
     ]
 
