@@ -202,6 +202,11 @@ format. Argumentet efter =-tegnet skal være stien til filen. Fx:
           )
     for setting in role_settings:
           print("  {:<18} {}".format( setting.cmd + "=", setting.doc ) )
+
+    print( "" )
+    for setting in settings:
+        if setting not in role_settings:
+            print("  {:<18} {}".format( setting.cmd + "=", setting.doc ) )
     sys.exit("\n")
 
 actions = [
