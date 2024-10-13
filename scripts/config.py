@@ -1,10 +1,12 @@
 import os
 from configparser import ConfigParser, ExtendedInterpolation
 
-defaults = {
-    "Files": { "contacts": "contacts.csv" },
-    "Paths": { "tex cache": "${cache}/tex" },
-    "TeXing": { "tex command": "pdflatex" }
+defaults =
+{ "Files" : { "contacts"      : "contacts.csv"
+            , "timesheet-info": "timesheet-data.txt"
+            }
+, "Paths" : { "tex cache"   : "${cache}/tex" }
+, "TeXing": { "tex command": "pdflatex" }
 }
 
 class Config:
