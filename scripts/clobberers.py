@@ -167,7 +167,9 @@ Navn i fordelingsfil:              => Skh.: Titel på gæt:
                 ))
             
         return { translations[t]["material"].title:
-                 translations[t][ "roles" ]
+                 [ translations[t][ "roles" ],
+                   translations[t].get( "instructors", None )
+                  ]
                  for t in translations }
 
     warn = """
@@ -183,7 +185,7 @@ det nu, du skal springe fra.
         if tex.info[ "title" ] in translations:
             # beklager, Mario. Din fuktion bor i en anden fil
             tex.update_roles(
-                translations[ tex.info[ "title" ]]
+                *(translations[ tex.info[ "title" ]])
             )
         return tex
 
