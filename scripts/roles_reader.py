@@ -84,7 +84,7 @@ begge er angivet prioriteres filnavnet.
                 "roles": [ role for role, instr
                            in zip( role_info["roles"], instrs )
                            if not instr or role.role
-                          ] + role_info["roles"][ : len(instrs) ]
+                          ] + role_info["roles"][ len(instrs) : ]
             }
         except TypeError:
             # no instrs
@@ -173,12 +173,12 @@ def pdf_matrix( fname, revue ):
     instructor_abbrs = {}
     while True:
         preamble_row = next( role_rows )
-        if not preable_row[0]:
+        if not preamble_row[0]:
             title_row = preamble_row
             break
         if "=" in preamble_row[0]:
-            abbr, desc = [ x.strip() for x in preamble_row.split( "=" ) ]
-            instructor_abbrs[ pair[0] ] = desc
+            abbr, desc = [ x.strip() for x in preamble_row[0].split( "=" ) ]
+            instructor_abbrs[ abbr ] = desc
     
     scorechart = {
         row[0]: {

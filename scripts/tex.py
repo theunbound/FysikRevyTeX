@@ -372,9 +372,14 @@ class TeX:
                 instr_start = roles_end
                 instr_end = roles_end + 1
                 if instr_lines:
-                    instr_lines = [ r"\begin{instructors}" ]\
+                    instr_lines = [ "\\begin{instructors}\n" ]\
                         + instr_lines\
-                        + [ r"\end{instructors}" ]
+                        + [ "\\end{instructors}\n" ]
+            else:
+               if not instr_lines:
+                  # delete the environment
+                  instr_start -= 1
+                  instr_end += 1
 
             if not sublist(
                     [ roles_start, roles_end ],

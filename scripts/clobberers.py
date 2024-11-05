@@ -149,7 +149,8 @@ Navn i fordelingsfil:              => Skh.: Titel på gæt:
             translations[ best ] = {
                 "material": materials[ maxindex ],
                 "conf": scorechart[ best ][ "scores" ][ maxindex ],
-                "roles": scorechart[ best ][ "roles" ]
+                "roles": scorechart[ best ][ "roles" ],
+                "instructors": scorechart[ best ].get( "instructors", None )
             }
             for name in scorechart:
                 scorechart[ name ][ "scores" ][ maxindex ] = 0
