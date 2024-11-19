@@ -80,6 +80,133 @@ def extract_multiple_lines(lines, line_number, start_delimiter='{', end_delimite
 
     return string.strip()
 
+def parse_lines( lines ):
+    "Extract the info_dict from lines of tex code"
+
+    info = {}
+
+    # Create lists for other stuff:
+    info["props"] = []
+    info["roles"] = []
+    info["appearing_roles"] = set() # How many people/abbreviations that occur in the actual sketch/song.
+    info["instructors"] = []
+
+    # List of keywords/commands to ignore, i.e. that are not relevant to extract:
+    ignore_list = ["documentclass", "usepackage", "begin", "end", "maketitle", "act", "scene"]
+
+    # Store the file content:
+    info['tex'] = lines
+    
+    for n,line in enumerate(lines):
+        line = line.strip() # Remove leading and trailing whitespaces
+        if len(line) > 0 and line[0] == '\\': # only look for a command
+
+            if "{" not in line:
+                # If it is a strange line, extract the first part (everything until the
+                # first non-alphanumeric character that isn't '\':
+                try:
+                    first_part = re.findall(r"\w+", line)[0]
+                except IndexError:
+                    # couldn't find a command, just ignore it
+                    pass
+                else:
+                    # if they write \instructor[title] name
+                    if first_part == "instructor":
+                        opt = opt_re.search( line )
+                        title = opt[1] if opt else "Instruktør"
+                        info[ "instructors" ] += [
+                            Role( title[0].lower(),
+                                  eol_re.search( line )[1] if opt \
+                                    else re.search(r"^.\w+(.*)", line)[1]\
+                                           .strip(),
+                                  title
+                                 )
+                        ]
+                    elif first_part not in ignore_list:
+                        # Find also the second part, i.e. whatever follows the first part (including
+                        # the non-alphanumeric character):
+                        end_part = re.findall(r"^.\w+(.*)", line)[0]
+
+                        # Store the info:
+                        info[first_part] = end_part
+
+            else:
+                try:
+                    command = re.findall(r"\w+", line)[0] # Extract (the first) command using regex
+                except IndexError:
+                    command = ""
+
+                if command not in ignore_list:
+
+                    try:
+                        keyword = kw_re.findall(line)[0].strip() # Extract (the first) keyword using regex
+                    except IndexError:
+                        # There is no ending '}' in the line.
+                        keyword = extract_multiple_lines(lines, n)
+
+                    # Now check whether the command is one of the important ones:
+                    if command == "prop":
+                        prop = keyword
+
+                        try:
+                            responsible = opt_re.findall(line)[0]
+                            index = line.rfind("]")
+                        except IndexError:
+                            # There is no responsible for this item.
+                            responsible = ""
+                            index = line.rfind("}")
+
+                        description = line[index+1:].strip()
+                        info["props"].append(Prop(prop, responsible, description))
+
+                    elif command == "role":
+                        abbreviation = keyword
+                        try:
+                            name = opt_re.findall(line)[0]
+                        except IndexError:
+                            # Ikke noget navn endnu
+                            name = ""
+                        try:
+                            role = eol_re.findall(line)[0]
+                        except IndexError:
+                            #ingen beskrivelse
+                            role = ""
+
+                        if '/' in name:
+                            # print("Warning! '/' is not allowed in "
+                            #       "actor names, but occurs in '{}' "
+                            #       "in file '{}'. ".format(name,self.fname))
+                            # print("It will be replaced by a dash ('-').")
+                            # Replace potential slash with a dash,
+                            # to avoid problems with slashes in filenames.
+                            name = name.replace("/", "-")
+
+                        info["roles"].append(Role(abbreviation, name, role))
+
+                    # if they write \instructor[title]{name}
+                    elif "instructor" in command:
+                        opt = opt_re.search( line )
+                        title = opt[1] if opt else "Instruktør"
+                        info["instructors"] += [
+                            Role( title[0].lower(),
+                                  kw_re.search( line )[1],
+                                  title
+                                 )
+                        ]
+
+                    elif command in ("sings", "says", "does"):
+                        # We count how many abbreviations actually appear in the sketch/song
+                        # in order to find missing persons in the roles list.
+                        abbreviations = \
+                          ( abbr.strip() for abbr in \
+                              re.split( text_list_re, keyword )
+                            if not abbr.strip().lower() == "alle"
+                           )
+                        info["appearing_roles"].update( abbreviations )
+                    else:
+                        # Store information:
+                        info[command] = keyword
+    return info
 
 class TeX:
     def __init__(self, arg = None):
@@ -136,130 +263,11 @@ class TeX:
         self.fullpath = os.path.abspath( fname )
         self.info['modification_time'] = os.stat(fname).st_mtime
 
-        # Create lists for other stuff:
-        self.info["props"] = []
-        self.info["roles"] = []
-        self.info["appearing_roles"] = set() # How many people/abbreviations that occur in the actual sketch/song.
-        self.info["instructors"] = []
-
-        # List of keywords/commands to ignore, i.e. that are not relevant to extract:
-        ignore_list = ["documentclass", "usepackage", "begin", "end", "maketitle", "act", "scene"]
-
         with open(fname, mode='r', encoding=encoding) as f:
             lines = f.readlines()
 
-        # Store the file content:
-        self.info['tex'] = lines
+        self.info |= parse_lines( lines )
 
-        for n,line in enumerate(lines):
-            line = line.strip() # Remove leading and trailing whitespaces
-            if len(line) > 0 and line[0] == '\\': # only look for a command
-
-                if "{" not in line:
-                    # If it is a strange line, extract the first part (everything until the
-                    # first non-alphanumeric character that isn't '\':
-                    try:
-                        first_part = re.findall(r"\w+", line)[0]
-                    except IndexError:
-                        # couldn't find a command, just ignore it
-                        pass
-                    else:
-                        # if they write \instructor[title] name
-                        if first_part == "instructor":
-                            opt = opt_re.search( line )
-                            title = opt[1] if opt else "Instruktør"
-                            self.info[ "instructors" ] += [
-                                Role( title[0].lower(),
-                                      eol_re.search( line )[1] if opt \
-                                        else re.search(r"^.\w+(.*)", line)[1]\
-                                               .strip(),
-                                      title
-                                     )
-                            ]
-                        elif first_part not in ignore_list:
-                            # Find also the second part, i.e. whatever follows the first part (including
-                            # the non-alphanumeric character):
-                            end_part = re.findall(r"^.\w+(.*)", line)[0]
-                            
-                            # Store the info:
-                            self.info[first_part] = end_part
-
-                else:
-                    try:
-                        command = re.findall(r"\w+", line)[0] # Extract (the first) command using regex
-                    except IndexError:
-                        command = ""
-
-                    if command not in ignore_list:
-
-                        try:
-                            keyword = kw_re.findall(line)[0].strip() # Extract (the first) keyword using regex
-                        except IndexError:
-                            # There is no ending '}' in the line.
-                            keyword = extract_multiple_lines(lines, n)
-
-                        # Now check whether the command is one of the important ones:
-                        if command == "prop":
-                            prop = keyword
-
-                            try:
-                                responsible = opt_re.findall(line)[0]
-                                index = line.rfind("]")
-                            except IndexError:
-                                # There is no responsible for this item.
-                                responsible = ""
-                                index = line.rfind("}")
-
-                            description = line[index+1:].strip()
-                            self.info["props"].append(Prop(prop, responsible, description))
-
-                        elif command == "role":
-                            abbreviation = keyword
-                            try:
-                                name = opt_re.findall(line)[0]
-                            except IndexError:
-                                # Ikke noget navn endnu
-                                name = ""
-                            try:
-                                role = eol_re.findall(line)[0]
-                            except IndexError:
-                                #ingen beskrivelse
-                                role = ""
-
-                            if '/' in name:
-                                print("Warning! '/' is not allowed in "
-                                      "actor names, but occurs in '{}' "
-                                      "in file '{}'. ".format(name,self.fname))
-                                print("It will be replaced by a dash ('-').")
-                                # Replace potential slash with a dash,
-                                # to avoid problems with slashes in filenames.
-                                name = name.replace("/", "-")
-
-                            self.info["roles"].append(Role(abbreviation, name, role))
-
-                        # if they write \instructor[title]{name}
-                        elif "instructor" in command:
-                            opt = opt_re.search( line )
-                            title = opt[1] if opt else "Instruktør"
-                            self.info["instructors"] += [
-                                Role( title[0].lower(),
-                                      kw_re.search( line )[1],
-                                      title
-                                     )
-                            ]
-
-                        elif command in ("sings", "says", "does"):
-                            # We count how many abbreviations actually appear in the sketch/song
-                            # in order to find missing persons in the roles list.
-                            abbreviations = \
-                              ( abbr.strip() for abbr in \
-                                  re.split( text_list_re, keyword )
-                                if not abbr.strip().lower() == "alle"
-                               )
-                            self.info["appearing_roles"].update( abbreviations )
-                        else:
-                            # Store information:
-                            self.info[command] = keyword
         return self
 
     def update_roles( self, roles, instructors=None ):

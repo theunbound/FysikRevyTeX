@@ -2,9 +2,10 @@ import os,re
 from time import localtime, strftime
 from datetime import timedelta
 from locale import strxfrm
+from collections import defaultdict
 
 import base_classes as bc
-from tex import TeX
+from tex import TeX, parse_lines
 from base_classes import Role
 from converters import Converter
 
@@ -50,61 +51,37 @@ def extract_duration( eta, fn, property="eta" ):
     except ValueError:
         return brok()
 
-class Material:
-    # TODO: This class should perhaps inherit from the completely general
-    # TeX class, as this is basically just a special case of a TeX file.
-    # This would make functions easier, as they can treat TeX and
-    # Material in the same way.
-    def __init__(self, info_dict):
+class MaterialInfo:
+    "Holds information about a Material apart from info on its .tex file."
+    
+    def __init__(self, info_dict, modification_time):
         "Extract data from dictionary returned by parsetexfile()."
 
-        def info_dict_get_or_empty_string( entry ):
-            # hvem ved, hvad de glemmer at skrive ind i tex-filen...
-            try:
-                return info_dict[ entry ]
-            except KeyError:
-                return ""
-        
-        self.path = os.path.abspath(info_dict["path"])
-        path, self.file_name = os.path.split(self.path)
+        # hvem ved, hvad de glemmer at skrive i tex-filen
+        info_dict = defaultdict( lambda: "", **info_dict )
 
-        self.title = info_dict_get_or_empty_string( "title" )
-        self.status = info_dict_get_or_empty_string( "status" )
-        if not self.status:
-            print("No status on '{}' is set.".format(self.title))
-        self.props = info_dict_get_or_empty_string( "props" )
+        self.modification_time = modification_time
+
+        self.title = info_dict[ "title" ]
+        self.status = info_dict[ "status" ]
+        self.props = info_dict[ "props" ]
         self.duration = extract_duration(
-            info_dict_get_or_empty_string( "eta" ), self.file_name
+            info_dict[ "eta" ], self.title
         )
         self.length = str( self.duration // timedelta( minutes = 1 ) )\
             if self.duration else ""
         self.scenechange = extract_duration(
-            info_dict_get_or_empty_string( "scenechange" ),
-            self.file_name, "scenechange"
+            info_dict[ "scenechange" ],
+            self.title, "scenechange"
         )
         self.stage_roles = info_dict["roles"]
         self.instructors = info_dict["instructors"]
-        self.responsible = info_dict_get_or_empty_string( "responsible" )
-        if self.responsible not in [ role.actor for role in self.roles ]:
-            print("Incorrect TeX responsible for '{}' ({})."
-                  .format(self.title, self.responsible or "<unspecified>"))
-
+        self.responsible = info_dict[ "responsible" ]
         for role in self.roles:
-            # Add the title of this material to the roles:
-            #role.add_material(self.title)
+            role.add_material(self)
             role.add_material_path(self.path)
 
-        # Extract the category (which is the directory):
-        self.category = Path( info_dict["path"] ).parts[0]
-
-        self.melody = info_dict_get_or_empty_string( "melody" )
-
-        # Meta data
-        self.modification_time = info_dict['modification_time']
-        self.has_been_texed = False
-
-        # Save the file content:
-        self.tex = info_dict['tex']
+        self.melody = info_dict[ "melody" ]
 
         # Stuff that could be used for future features:
         self.appearing_roles = info_dict["appearing_roles"]
@@ -121,35 +98,20 @@ class Material:
                                   ""
             )]
         
-
-        # To be deprecated (most likely):
-        self.author = info_dict_get_or_empty_string( "author" )
-        if not self.author:
-            print("No author for '{}' is declared.".format(self.title))
-        self.year = info_dict_get_or_empty_string( "revyyear" )
-        self.revue = info_dict_get_or_empty_string( "revyname" )
-        self.version = info_dict_get_or_empty_string( "version" )
+        self.author = info_dict[ "author" ]
+        self.year = info_dict[ "revyyear" ]
+        self.revue = info_dict[ "revyname" ]
+        self.version = info_dict[ "version" ]
 
     @classmethod
-    def fromfile(cls, filename):
-        "Parse TeX file."
-        tex = TeX()
-        tex.parse(filename)
-        info_dict = tex.info
-        info_dict["path"] = filename
-        return cls(info_dict)
+    def from_tex_fragment( cls, fragment, modification_time ):
+        return cls( parse_lines( fragment.replace( "\\", "\n\\" ) ),
+                    modification_time
+                   )
 
     @property
     def roles( self ):
         return self.stage_roles + self.instructors
-
-    def write(self, fname, encoding='utf-8'):
-        "Write to a TeX file."
-        # FIXME: this pretty much proves that TeX and Material need to be
-        # merged somehow.
-        with open(fname, 'w', encoding=encoding) as f:
-            for line in self.tex:
-                f.write(line)
 
     def __repr__(self):
         return "{} ({} min): {}".format(self.title, self.length, self.status)
@@ -173,6 +135,55 @@ class Material:
                     actor.add_instructorship( role )
                 list_of_actors.append(actor)
 
+class Material( MaterialInfo ):
+    "Describes material that comes from a .tex-file"
+    # TODO: This class should perhaps inherit from the completely general
+    # TeX class, as this is basically just a special case of a TeX file.
+    # This would make functions easier, as they can treat TeX and
+    # Material in the same way.
+    def __init__(self, info_dict):
+        "Extract data from dictionary returned by parsetexfile()."
+
+        self.path = os.path.abspath(info_dict["path"])
+        path, self.file_name = os.path.split(self.path)
+
+        # Meta data
+        self.modification_time = info_dict['modification_time']
+        self.has_been_texed = False
+        # Save the file content:
+        self.tex = info_dict['tex']
+
+        MaterialInfo.__init__( self, info_dict, self.modification_time )
+
+        # things to complain about
+        if not self.status:
+            print("No status on '{}' is set.".format(self.title))
+        if self.responsible not in [ role.actor for role in self.roles ]:
+            print("Incorrect TeX responsible for '{}' ({})."
+                  .format(self.title, self.responsible or "<unspecified>"))
+        if not self.author:
+            print("No author for '{}' is declared.".format(self.title))
+
+        # Extract the category (which is the directory):
+        self.category = Path( info_dict["path"] ).parts[0]
+
+    @classmethod
+    def fromfile(cls, filename):
+        "Parse TeX file."
+        tex = TeX()
+        tex.parse(filename)
+        info_dict = tex.info
+        info_dict["path"] = filename
+        return cls(info_dict)
+
+    def write(self, fname, encoding='utf-8'):
+        "Write to a TeX file."
+        # FIXME: this pretty much proves that TeX and Material need to be
+        # merged somehow.
+        with open(fname, 'w', encoding=encoding) as f:
+            for line in self.tex:
+                f.write(line)
+
     @property
     def wordcounts(self):
         try:
@@ -187,9 +198,9 @@ class Material:
             
 
 class Act:
-    def __init__(self):
-        self.name = ""
-        self.materials = []
+    def __init__(self, name = "" ):
+        self.name = name
+        self.outline_entries = []
 
     def __repr__(self):
         desc = "{}: {} songs/sketches; {} min in total.\n".format(self.name, len(self.materials), self.get_length())
@@ -198,11 +209,18 @@ class Act:
 
         return desc
 
+    @property
+    def materials( self ):
+        mats = [ mat for mat in self.outline_entries
+                 if isinstance( mat, Material )
+                ]
+        return mats
+
     def add_name(self, name):
         self.name = name
 
     def add_material(self, material):
-        self.materials.append(material)
+        self.outline_entries.append(material)
 
     def is_empty(self):
         if len(self.materials) == 0:
@@ -213,7 +231,7 @@ class Act:
     def get_length(self):
         t = 0
         n = {}
-        for m in self.materials:
+        for m in self.outline_entries:
             try:
                 t += float(m.length)
             except ValueError:
@@ -255,41 +273,42 @@ class Revue:
     def fromfile(cls, filename, encoding='utf-8'):
         "Takes a plan file and extracts the information for each material."
 
+        mod_time = os.stat( filename ).st_mtime
         acts = []
-        act = Act()
+
+        def current_act():
+            nonlocal acts
+            while True:
+                try:
+                    return acts[-1]
+                except IndexError:
+                    acts = [ Act() ]
+        # act = Act()
 
         with open(filename, mode='r', encoding=encoding) as f:
             for line in f.readlines():
-                line = line.rstrip()
-                if len(line) > 0 and line[0] != "#":
-                    if line[-3:] != 'tex':
-                        # If not a TeX file, it must be the name of the new act:
-                        if act.is_empty():
-                            # If the Act is empty, we give it a name:
-                            act.add_name(line)
-                        else:
-                            # If not, we store the current act and create a new:
-                            acts.append(act)
-                            act = Act()
-                            act.add_name(line)
-                    else:
-                        try:
-                            m = Material.fromfile(line)
-                            for role in m.roles:
-                                role.add_material(m)
-                            act.add_material(m)
-                        except NameError as err:
-                            print("You need a name for the act before any TeX file is listed.")
-                            print("Problematic file: {}".format(filename))
-                            print("Error raised: {}".format(err))
-                            raise err
-
-            # Store the very last act:
-            acts.append(act)
-
+                line = line.strip()
+                match line:
+                    case "":
+                        pass
+                    case line if line[0] == "#":
+                        # comment
+                        pass
+                    case line if line[0] == "\\":
+                        # material snippet
+                        current_act().add_material(
+                            MaterialInfo.from_tex_fragment( line, mod_time )
+                        )
+                    case line if line[-4:] == ".tex":
+                        # tex file path
+                        current_act().add_material( Material.fromfile( line ) )
+                    case _:
+                        # act title
+                        acts += [ Act( line ) ]
+                            
         r = cls(acts)
         # Hust modifikations-tid for aktoversigten
-        r.modification_time = os.stat( filename ).st_mtime
+        r.modification_time = mod_time
         return r
 
     def __repr__(self):
