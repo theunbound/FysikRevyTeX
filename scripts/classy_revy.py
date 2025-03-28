@@ -50,12 +50,24 @@ def extract_duration( eta, fn, property="eta" ):
     except ValueError:
         return brok()
 
-class Material:
+class Scene:
+    "A Scene is a thing that (possibly) gets an entry in\n"\
+    "the setlist (aktoversigten)."
     # TODO: This class should perhaps inherit from the completely general
     # TeX class, as this is basically just a special case of a TeX file.
     # This would make functions easier, as they can treat TeX and
     # Material in the same way.
-    def __init__(self, info_dict):
+    @classmethod
+    def fromstring( cls, string, source_file = None ):
+        tex = TeX()
+        re_cmd_start = re.compile( r"([^\n])\\" )
+        tex.parse_lines( string if type( string ) == list
+                         else re_cmd_start.sub( r"\1\n\\", string )\
+                                .split( "\m" ) 
+                        )
+        return cls( tex.info, source_file )
+
+    def __init__(self, info_dict, source_file = None ):
         "Extract data from dictionary returned by parsetexfile()."
 
         def info_dict_get_or_empty_string( entry ):
@@ -64,10 +76,9 @@ class Material:
                 return info_dict[ entry ]
             except KeyError:
                 return ""
-        
-        self.path = os.path.abspath(info_dict["path"])
-        path, self.file_name = os.path.split(self.path)
 
+        self.file_name = source_file or "generated TeX"
+        
         self.title = info_dict_get_or_empty_string( "title" )
         try:
             self.shorttitle = info_dict["shorttitle"]
@@ -95,17 +106,12 @@ class Material:
             print("Incorrect TeX responsible for '{}' ({})."
                   .format(self.title, self.responsible or "<unspecified>"))
 
-
-        # Extract the category (which is the directory):
-        self.category = Path( info_dict["path"] ).parts[0]
-
         self.melody = info_dict_get_or_empty_string( "melody" )
 
-        # Meta data
-        self.modification_time = info_dict['modification_time']
-        self.has_been_texed = False
+        # TODO: modification_time is modtime of aktoversigt.plan
 
         # Save the file content:
+        # TODO: even if there isn't a file...?
         self.tex = info_dict['tex']
 
         # Stuff that could be used for future features:
@@ -132,15 +138,6 @@ class Material:
         self.revue = info_dict_get_or_empty_string( "revyname" )
         self.version = info_dict_get_or_empty_string( "version" )
 
-    @classmethod
-    def fromfile(cls, filename):
-        "Parse TeX file."
-        tex = TeX()
-        tex.parse(filename)
-        info_dict = tex.info
-        info_dict["path"] = filename
-        return cls(info_dict)
-
     @property
     def shorttitle( self ):
         try:
@@ -157,14 +154,6 @@ class Material:
     @property
     def roles( self ):
         return self.stage_roles + self.instructors
-
-    def write(self, fname, encoding='utf-8'):
-        "Write to a TeX file."
-        # FIXME: this pretty much proves that TeX and Material need to be
-        # merged somehow.
-        with open(fname, 'w', encoding=encoding) as f:
-            for line in self.tex:
-                f.write(line)
 
     def __repr__(self):
         return "{} ({} min): {}".format(self.title, self.length, self.status)
@@ -188,6 +177,40 @@ class Material:
                     actor.add_instructorship( role )
                 list_of_actors.append(actor)
 
+
+class Material( Scene ):
+    "A Material is a Scene with an associated TeX file."
+    
+    @classmethod
+    def fromfile(cls, filename):
+        "Parse TeX file."
+        tex = TeX()
+        tex.parse(filename)
+        info_dict = tex.info
+        info_dict["path"] = filename
+        return cls(info_dict)
+
+    def __init__( self, info_dict ):
+        super().__init__( self, info_dict )
+        
+        self.path = os.path.abspath(info_dict["path"])
+        path, self.file_name = os.path.split(self.path)
+
+        # Meta data
+        self.modification_time = info_dict['modification_time']
+        self.has_been_texed = False
+
+        # Extract the category (which is the directory):
+        self.category = Path( info_dict["path"] ).parts[0]
+
+    def write(self, fname, encoding='utf-8'):
+        "Write to a TeX file."
+        # FIXME: this pretty much proves that TeX and Material need to be
+        # merged somehow.
+        with open(fname, 'w', encoding=encoding) as f:
+            for line in self.tex:
+                f.write(line)
+
     @property
     def wordcounts(self):
         try:
@@ -204,7 +227,7 @@ class Material:
 class Act:
     def __init__(self):
         self.name = ""
-        self.materials = []
+        self.scenes = []
 
     def __repr__(self):
         desc = "{}: {} songs/sketches; {} min in total.\n".format(self.name, len(self.materials), self.get_length())
@@ -216,16 +239,25 @@ class Act:
     def add_name(self, name):
         self.name = name
 
-    def add_material(self, material):
-        self.materials.append(material)
+    def add_scene( self, new_scene ):
+        self.scenes.append( new_scene )
+
+    @property
+    def materials( self ):
+        return [ scene for scene in self.scenes
+                 if isinstance( scene, Material )
+                ]
+
+    add_material = add_scene
 
     def is_empty(self):
         return len(self.materials) == 0
 
-    def get_length(self):
+    def get_length(self, include_stubs = True ):
         t = 0
         n = {}
-        for m in self.materials:
+        scene_list = self.scenes if include_stubs else self.materials
+        for m in scene_list:
             try:
                 t += float(m.length)
             except ValueError:
@@ -267,29 +299,37 @@ class Revue:
     def fromfile(cls, filename, encoding='utf-8'):
         "Takes a plan file and extracts the information for each material."
 
+        re_tex_cmd = re.compile( r"\\\w+[[{]" )
         acts = []
         act = Act()
 
         with open(filename, mode='r', encoding=encoding) as f:
             for line in f.readlines():
                 line = line.rstrip()
-                if len(line) > 0 and line[0] != "#":
-                    if line[-3:] != 'tex':
-                        # If not a TeX file, it must be the name of the new act:
-                        if act.is_empty():
-                            # If the Act is empty, we give it a name:
-                            act.add_name(line)
-                        else:
-                            # If not, we store the current act and create a new:
-                            acts.append(act)
-                            act = Act()
-                            act.add_name(line)
-                    else:
-                        m = Material.fromfile(line)
-                        for role in m.roles:
-                            role.add_material(m)
-                        act.add_material(m)
-
+                if len(line) == 0 or line[0] == "#":
+                    continue
+                s = None
+                if line[-4:] == '.tex':
+                    s = Material.fromfile( line )
+                elif re_tex_cmd.search( line ):
+                    # stub scene
+                    s = Scene.fromstring( line )
+                if s:
+                    for role in s.roles:
+                        role.add_material(s)
+                    act.add_scene(s)
+                    continue
+                    
+                # otherwise, it must be the name of the new act:
+                if act.is_empty():
+                    # If the Act is empty, we give it a name:
+                    act.add_name(line)
+                else:
+                    # If not, we store the current act and create a new:
+                    acts.append(act)
+                    act = Act()
+                    act.add_name(line)
+        
             # Store the very last act:
             acts.append(act)
 
@@ -308,6 +348,10 @@ class Revue:
     @property
     def materials( self ):
         return ( mat for act in self.acts for mat in act.materials )
+
+    @property
+    def scenes( self ):
+        return ( sc for act in self.acts for sc in act.scenes )
 
     def write_roles_csv( self, fn = "roles.csv" ):
         fn = Path( fn )
