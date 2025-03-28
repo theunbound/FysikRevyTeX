@@ -95,10 +95,6 @@ class Material:
             print("Incorrect TeX responsible for '{}' ({})."
                   .format(self.title, self.responsible or "<unspecified>"))
 
-        for role in self.roles:
-            # Add the title of this material to the roles:
-            #role.add_material(self.title)
-            role.add_material_path(self.path)
 
         # Extract the category (which is the directory):
         self.category = Path( info_dict["path"] ).parts[0]
