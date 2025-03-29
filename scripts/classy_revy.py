@@ -191,7 +191,7 @@ class Material( Scene ):
         return cls(info_dict)
 
     def __init__( self, info_dict ):
-        super().__init__( self, info_dict )
+        super().__init__( info_dict )
         
         self.path = os.path.abspath(info_dict["path"])
         path, self.file_name = os.path.split(self.path)
@@ -231,7 +231,7 @@ class Act:
 
     def __repr__(self):
         desc = "{}: {} songs/sketches; {} min in total.\n".format(self.name, len(self.materials), self.get_length())
-        for i,m in enumerate(self.materials):
+        for i,m in enumerate(self.scenes):
             desc += "  {}. {}\n".format(i+1, m)
 
         return desc
