@@ -136,6 +136,17 @@ class TeX:
         self.fullpath = os.path.abspath( fname )
         self.info['modification_time'] = os.stat(fname).st_mtime
 
+        with open(fname, mode='r', encoding=encoding) as f:
+            lines = f.readlines()
+
+        return self.parse_lines( lines )
+
+    def parse_lines( self, lines ):
+        "Parse a list of lines of TeX, and extract the info_dict"
+
+        if isinstance( lines, str ):
+           raise TypeError("TeX.parse_lines only accepts an iterable of strings, not a single string.")
+
         # Create lists for other stuff:
         self.info["props"] = []
         self.info["roles"] = []
@@ -145,11 +156,17 @@ class TeX:
         # List of keywords/commands to ignore, i.e. that are not relevant to extract:
         ignore_list = ["documentclass", "usepackage", "begin", "end", "maketitle", "act", "scene", "#"]
 
-        with open(fname, mode='r', encoding=encoding) as f:
-            lines = f.readlines()
-
         # Store the file content:
         self.info['tex'] = lines
+        # TODO: so, should the class TeX hold complete, TeX-able
+        # documents, or just collections of TeX code? There's no way
+        # of composing them into TeX-able documents if the latter. But
+        # there's no way of validating TeX-ability if the
+        # former. We'll either throw away valid documents, or hold
+        # invalid ones.
+        # Clearly, this represents a failure of the class system abstraction.
+        # Who wants do do a major refactoring to fix that?
+        # Anyone?
 
         for n,line in enumerate(lines):
             line = line.strip() # Remove leading and trailing whitespaces
