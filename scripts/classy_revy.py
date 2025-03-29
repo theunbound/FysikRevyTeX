@@ -63,7 +63,7 @@ class Scene:
         re_cmd_start = re.compile( r"([^\n])\\" )
         tex.parse_lines( string if type( string ) == list
                          else re_cmd_start.sub( r"\1\n\\", string )\
-                                .split( "\m" ) 
+                                .split( "\n" ) 
                         )
         return cls( tex.info, source_file )
 
