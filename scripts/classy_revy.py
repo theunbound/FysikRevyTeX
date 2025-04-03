@@ -52,22 +52,22 @@ def extract_duration( eta, fn, property="eta" ):
 
 class Scene:
     "A Scene is a thing that (possibly) gets an entry in\n"\
-    "the setlist (aktoversigten)."
+    "the outline (aktoversigten)."
     # TODO: This class should perhaps inherit from the completely general
     # TeX class, as this is basically just a special case of a TeX file.
     # This would make functions easier, as they can treat TeX and
     # Material in the same way.
     @classmethod
-    def fromstring( cls, string, source_file = None ):
+    def fromstring( cls, string, source_file = None, source_mtime = None ):
         tex = TeX()
         re_cmd_start = re.compile( r"([^\n])\\" )
         tex.parse_lines( string if type( string ) == list
                          else re_cmd_start.sub( r"\1\n\\", string )\
                                 .split( "\n" ) 
                         )
-        return cls( tex.info, source_file )
+        return cls( tex.info, source_file, source_mtime )
 
-    def __init__(self, info_dict, source_file = None ):
+    def __init__(self, info_dict, source_file = None, source_mtime = None ):
         "Extract data from dictionary returned by parsetexfile()."
 
         def info_dict_get_or_empty_string( entry ):
@@ -77,7 +77,11 @@ class Scene:
             except KeyError:
                 return ""
 
-        self.file_name = source_file or "generated TeX"
+        try:
+            self.file_name = source_file or self.file_name
+        except AttributeError:
+            # tried and failed to find self.file_name
+            self.file_name = "generated TeX"
         
         self.title = info_dict_get_or_empty_string( "title" )
         try:
@@ -108,7 +112,8 @@ class Scene:
 
         self.melody = info_dict_get_or_empty_string( "melody" )
 
-        # TODO: modification_time is modtime of aktoversigt.plan
+        if source_mtime:
+            self.modification_time = source_mtime
 
         # Save the file content:
         # TODO: even if there isn't a file...?
@@ -128,7 +133,8 @@ class Scene:
                                   "!!!!!!!",
                                   ""
             )]
-        
+
+        self.category = info_dict_get_or_empty_string( "category" )
 
         # To be deprecated (most likely):
         self.author = info_dict_get_or_empty_string( "author" )
@@ -191,10 +197,11 @@ class Material( Scene ):
         return cls(info_dict)
 
     def __init__( self, info_dict ):
-        super().__init__( info_dict )
         
         self.path = os.path.abspath(info_dict["path"])
         path, self.file_name = os.path.split(self.path)
+
+        super().__init__( info_dict )
 
         # Meta data
         self.modification_time = info_dict['modification_time']
@@ -299,6 +306,9 @@ class Revue:
     def fromfile(cls, filename, encoding='utf-8'):
         "Takes a plan file and extracts the information for each material."
 
+        # Hust modifikations-tid for aktoversigten
+        modification_time = os.stat( filename ).st_mtime
+
         re_tex_cmd = re.compile( r"\\\w+[[{]" )
         acts = []
         act = Act()
@@ -313,7 +323,10 @@ class Revue:
                     s = Material.fromfile( line )
                 elif re_tex_cmd.search( line ):
                     # stub scene
-                    s = Scene.fromstring( line )
+                    s = Scene.fromstring( line,
+                                          Path( filename ).name,
+                                          modification_time
+                                         )
                 if s:
                     for role in s.roles:
                         role.add_material(s)
@@ -334,8 +347,7 @@ class Revue:
             acts.append(act)
 
         r = cls(acts)
-        # Hust modifikations-tid for aktoversigten
-        r.modification_time = os.stat( filename ).st_mtime
+        r.modification_time = modification_time
         return r
 
     def __repr__(self):

@@ -491,10 +491,13 @@ class TeX:
                 self.tex += """\\emph{{{revue_name} {revue_year}}}\\\\
         \t\t\\small{{Status: {status}, \\emph{{Tidsestimat: {length} minutter}}}}\n""".format(revue_name=m.revue, revue_year=m.year, status=m.status, length=m.length)
 
-                self.info[ "modification_time" ] = max(
-                    self.info[ "modification_time" ],
-                    m.modification_time
-                )
+                try:
+                   self.info[ "modification_time" ] = max(
+                      self.info[ "modification_time" ],
+                      m.modification_time
+                   )
+                except AttributeError:
+                   pass
 
             self.tex += "\\end{enumerate}\n\n"
 
