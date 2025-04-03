@@ -656,7 +656,9 @@ class TeX:
                   for actor in self.revue.actors
                  ]
             ))\
-            .replace( "<+MNTHEIGHT+>", self.conf["TeXing"]["timesheet scale"] )\
+            .replace( "<+MNTHEIGHT+>",
+                      self.conf["Timesheet"]["timesheet scale"]
+                     )\
             .split( "<+NUMBERS+>" )
         self.info["tex"] = [ front ]
 
@@ -700,7 +702,7 @@ class TeX:
                             .format(
                                 material.duration / timedelta( minutes=1 ),
                                 material.scenechange / timedelta( minutes=1 ) \
-                                  or conf["TeXing"]["default scene change"]
+                                  or conf["Timesheet"]["default scene change"]
                             )
                         for material in act.materials
                     ]),

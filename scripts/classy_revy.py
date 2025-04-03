@@ -127,7 +127,7 @@ class Scene:
                                     role.abbreviation for role in self.roles
                                  ]
         ]
-        if conf.getboolean( "TeXing", "supernumeraries" )\
+        if conf.getboolean( "Role overview", "supernumeraries" )\
         and self.supernumeraries:
             self.roles += [ Role( " ".join( self.supernumeraries ),
                                   "!!!!!!!",
