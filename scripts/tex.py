@@ -605,6 +605,7 @@ class TeX:
         template[0] = template[0].replace("<+EXPS+>", "\n\n".join(expls) + "\n")
 
         # Find longest title for pretty printing:
+        # (in the intermediate .tex file, that you outght never need to look at)
         pad = max(len(m.shorttitle) for act in self.revue.acts \
                   for m in act.materials
                   )

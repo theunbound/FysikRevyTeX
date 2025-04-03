@@ -39,7 +39,8 @@ def extract_duration( eta, fn, property="eta" ):
             return timedelta( minutes=float( e.replace( ",","." ) ) )
         except ValueError:
             pass
-    m,s = [ (r.search( e ) or [ None, "0" ])[1] for r in re_m_s ]
+    none_match = [ None, "0" ]
+    m,s = [ ( r.search( e ) or none_match )[1] for r in re_m_s ]
     for t in m,s:
         if "." in t or "," in t or ":" in t:
             return extract_duration( t, fn, property )
