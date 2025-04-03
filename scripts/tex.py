@@ -3,6 +3,7 @@ import os
 import re
 import sys
 import locale
+import re
 from time import localtime, strftime
 from pathlib import Path
 from functools import cmp_to_key
@@ -563,6 +564,13 @@ class TeX:
                                         "role_overview_template.tex")
         self.tex = ""
 
+        include = re.split( r"\s*,\s*",
+                            conf["Role overview"]["include categories"]
+                           )
+        exclude = re.split( r"\s*,\s*",
+                            conf["Role overview"]["exclude categories"]
+                           )
+
         insts = {}
         for mat in self.revue.materials:
             for inst in mat.instructors:
@@ -616,7 +624,18 @@ class TeX:
                     width=len(self.revue.actors)+2, title=act.name)
             self.tex += "\n\\hline\n"
 
-            for m, mat in enumerate(act.materials):
+            m = 0
+            for mat in act.scenes:
+                if mat.category in exclude:
+                   continue
+                if not mat.roles \
+                      and not mat.category in include \
+                      and conf.getboolean("Role overview",
+                                          "skip scenes with no roles"):
+                   print( "Role overview: skipped scene with no roles: {}"\
+                          .format( mat.title ) )
+                   continue
+
                 self.tex += "\n{:2d} & {:<{width}}".format(m+1, mat.shorttitle, width=pad)
                 for actor in self.revue.actors:
                     for role in actor.roles:
@@ -635,6 +654,7 @@ class TeX:
                     self.info[ "modification_time" ],
                     mat.modification_time
                 )
+                m += 1
 
         template.insert(1,self.tex)
         self.tex = "\n".join(template)
