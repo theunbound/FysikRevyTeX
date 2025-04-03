@@ -479,11 +479,22 @@ class TeX:
         for act in self.revue.acts:
             self.tex += ("\\section*{{{act_title} \\small{{\\textbf{{"
                         "\\emph{{(Tidsestimat: {act_length} minutter)}}"
-                        "}}}}}}\n".format(act_title=act.name, act_length=act.get_length()))
+                        "}}}}}}\n".format(act_title=act.name, act_length=act.get_length(conf["TeXing"].getboolean("stubs in outline"))))
             self.tex += "\\begin{enumerate}\n"
 
-            for m in act.materials:
-                self.tex += "\t\\item \\textbf{{{title}}} ".format(title = m.title)
+            ms = act.scenes \
+               if conf["TeXing"].getboolean("stubs in outline") \
+               else act.materials
+            for m in ms:
+                self.tex += "\t\\item"
+
+                numcat = re.split( r"\s*,\s*",
+                                   conf["TeXing"]["numbered categories"]
+                                  )
+                if numcat != [""] and not m.category in numcat:
+                   self.tex += "[\\textsc{{{}}}]".format( m.category.lower() )
+
+                self.tex += " \\textbf{{{title}}} ".format(title = m.title)
 
                 if m.melody:
                     self.tex += "({melody}) ".format(melody=m.melody)
