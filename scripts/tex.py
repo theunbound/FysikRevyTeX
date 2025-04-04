@@ -571,8 +571,27 @@ class TeX:
                             conf["Role overview"]["exclude categories"]
                            )
 
+        def include_scene( scene ):
+           if scene.category in exclude:
+              return False
+           if not scene.roles \
+                 and not scene.category in include \
+                 and conf.getboolean("Role overview",
+                                     "skip scenes with no roles"):
+              print( "Role overview: skipped scene with no roles: {}"\
+                     .format( scene.title ) )
+              return False
+           return True
+
+        roles_acts = [
+           { "name": a.name,
+             "scenes": [ s for s in a.scenes if include_scene( s ) ]
+            } for a in self.revue.acts
+        ]
+        roles_scenes = [ s for a in roles_acts for s in a["scenes"] ]
+
         insts = {}
-        for mat in self.revue.materials:
+        for mat in roles_scenes:
             for inst in mat.instructors:
                 try:
                     if inst.role.lower() not in (
@@ -586,7 +605,7 @@ class TeX:
         expls = [ r"\textit{{{}}} = {}".format( k, "/".join( insts[k] ) )
                   for k in insts
                  ]
-        if { mat.responsible for mat in self.revue.materials } \
+        if { mat.responsible for mat in roles_scenes } \
            & { a.name for a in self.revue.actors }:
             expls += [ r"\resp{X} = \TeX ansvarlig" + "\n" ]
 
@@ -619,23 +638,12 @@ class TeX:
             self.tex += "@{}".format(self.revue.actors[i])
         self.tex += r"}\\" + "\n\\hline\n"
 
-        for act in self.revue.acts:
+        for act in roles_acts:
             self.tex += r"\multicolumn{{{width}}}{{|l|}}{{\textbf{{{title}}}}}\\".format(
-                    width=len(self.revue.actors)+2, title=act.name)
+                    width=len(self.revue.actors)+2, title=act["name"])
             self.tex += "\n\\hline\n"
 
-            m = 0
-            for mat in act.scenes:
-                if mat.category in exclude:
-                   continue
-                if not mat.roles \
-                      and not mat.category in include \
-                      and conf.getboolean("Role overview",
-                                          "skip scenes with no roles"):
-                   print( "Role overview: skipped scene with no roles: {}"\
-                          .format( mat.title ) )
-                   continue
-
+            for m, mat in enumerate( act["scenes"] ):
                 self.tex += "\n{:2d} & {:<{width}}".format(m+1, mat.shorttitle, width=pad)
                 for actor in self.revue.actors:
                     for role in actor.roles:
@@ -654,7 +662,6 @@ class TeX:
                     self.info[ "modification_time" ],
                     mat.modification_time
                 )
-                m += 1
 
         template.insert(1,self.tex)
         self.tex = "\n".join(template)
