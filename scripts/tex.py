@@ -705,28 +705,27 @@ class TeX:
                 "\\hline&&{{\\bfseries {}}}\\\\\\hline".format( act.name ),
                 "\\timescale[y]{{{}}}"\
                 .format(
-                    # int( len( act.materials ) * 1.5 ),
-                    ( sum( (m.duration for m in act.materials), timedelta() )
-                      + timedelta( seconds=10 ) * ( len( act.materials ) - 1 )
+                    ( sum( (m.duration for m in act.scenes), timedelta() )
+                      + timedelta( seconds=10 ) * ( len( act.scenes ) - 1 )
                      ) // timedelta( minutes=1 )
 
                 ),
                 "&\\tikz{\\draw ",
                 " +(0,0) ".join([
                     "[numbertime={{{}:{:0>2}}}{{{}}}{{{}}}]".format(
-                        material.duration // timedelta( minutes=1 ),
-                        material.duration.seconds % 60,
-                        material.duration / timedelta( minutes=1 ),
-                        material.scenechange / timedelta( minutes=1 ) or \
+                        scene.duration // timedelta( minutes=1 ),
+                        scene.duration.seconds % 60,
+                        scene.duration / timedelta( minutes=1 ),
+                        scene.scenechange / timedelta( minutes=1 ) or \
                           conf["TeXing"]["default scene change"]
-                    ) for material in act.materials ]),
+                    ) for scene in act.scenes ]),
                 ";}& \\tikz[remember picture]{ \\draw ",
                 " +(0,0) ".join([ "[numbertitle={{{}}}{{{}}}{{{}}}]".format(
-                    material.title,
-                    material.duration / timedelta( minutes=1 ),
-                    material.scenechange / timedelta( minutes=1 ) or \
+                    scene.title,
+                    scene.duration / timedelta( minutes=1 ),
+                    scene.scenechange / timedelta( minutes=1 ) or \
                       conf["TeXing"]["default scene change"]
-                ) for material in act.materials ]),
+                ) for scene in act.scenes ]),
                 ";}"
             ]
             for actor in self.revue.actors:
@@ -734,32 +733,21 @@ class TeX:
                     "&\\tikz{ \\draw (0,0) ",
                     " +(0,0) ".join([
                         "[" + ( "onstage" if actor.name in
-                                ( m_r.actor for m_r in material.stage_roles )
+                                ( m_r.actor for m_r in scene.stage_roles )
                                 else "offstage" )\
                         + "={{{}}}{{{}}}]"\
                             .format(
-                                material.duration / timedelta( minutes=1 ),
-                                material.scenechange / timedelta( minutes=1 ) \
+                                scene.duration / timedelta( minutes=1 ),
+                                scene.scenechange / timedelta( minutes=1 ) \
                                   or conf["Timesheet"]["default scene change"]
                             )
-                        for material in act.materials
+                        for scene in act.scenes
                     ]),
                     ";}"
                 ]
             self.info["tex"] += [ "\\\\" ]
 
         self.info["tex"] += [ back ]
-
-        # self.info["tex"] = [ front ]\
-        #     + [ line for act in self.revue.acts
-        #         for line in
-        #         [ "\\hline&{{\\bfseries {}}}\\\\\\hline".format( act.name ) ]\
-        #         + [ #"\\\\[.1666em]
-        #             "".join(
-        #                 [ hoik( material ) for material in act.materials ]
-        #         ) ]
-        #        ]\
-        #     + [ back ]
 
         return self
 
